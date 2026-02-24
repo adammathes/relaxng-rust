@@ -1,4 +1,4 @@
-use relaxng_model::Compiler;
+use relaxng_model::{Compiler, Syntax};
 use relaxng_validator::Validator;
 
 use std::fs::File;
@@ -20,7 +20,11 @@ fn main() {
 }
 
 fn validate(schema: PathBuf, xmls: Vec<PathBuf>) {
-    let mut compiler = Compiler::default();
+    let syntax = match schema.extension().and_then(|e| e.to_str()) {
+        Some("rng") => Syntax::Xml,
+        _ => Syntax::Compact,
+    };
+    let mut compiler = Compiler::new(relaxng_model::FsFiles, syntax);
     let model = match compiler.compile(&schema) {
         Ok(m) => m,
         Err(err) => {

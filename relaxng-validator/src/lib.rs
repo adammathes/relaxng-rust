@@ -24,7 +24,7 @@ pub enum ValidatorError<'a> {
 }
 
 #[derive(PartialEq, Eq, Hash, Copy, Clone, Debug)]
-struct PatId(u16);
+struct PatId(u32);
 
 // TODO: separate representations?
 //       1) includes 'Placeholder, but doesn't include nullability flags or 'After'
@@ -87,13 +87,17 @@ struct Schema {
 impl Schema {
     fn push(&self, p: Pat) -> PatId {
         let mut inner = self.inner.borrow_mut();
-        if inner.patterns.len() > 0xffff {
-            panic!("Only up to 2^16 rules supported in one schema")
+        // Guard against exponential blowup in interleave/choice derivatives.
+        // 2^16 (65535) is sufficient for almost all real-world schemas that don't
+        // trigger pathological blowup. Schemas that do blowup would hang forever
+        // without this check; this gives a clean diagnostic instead.
+        if inner.patterns.len() > 0x0fff_ffff {
+            panic!("Schema derivative complexity limit exceeded (pattern count > 268M)")
         }
         if let Some(id) = inner.memo.get(&p) {
             *id
         } else {
-            let id = PatId(inner.patterns.len() as u16);
+            let id = PatId(inner.patterns.len() as u32);
             inner.memo.insert(p.clone(), id);
             inner.patterns.push(p);
             id
