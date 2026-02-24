@@ -493,7 +493,7 @@ fn group_pattern(input: Span) -> IResult<Span, Pattern> {
 fn datatype_value_pattern(input: Span) -> IResult<Span, DatatypeValuePattern> {
     let parse = (opt(datatype_name), space_comment0, datatype_value);
 
-    let mut parser = map(parse, |(name, _, value)| DatatypeValuePattern(name, value));
+    let mut parser = map(parse, |(name, _, value)| DatatypeValuePattern(name, value, vec![]));
 
     parser.parse(input)
 }
@@ -1328,6 +1328,7 @@ mod test {
                         body: "preserve".to_string(),
                     }],
                 ),
+                vec![],
             )),
         )
     }

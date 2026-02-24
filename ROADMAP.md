@@ -6,19 +6,11 @@ The spectest suite (from the official RELAX NG test suite) shows:
 
 | Metric   | Count |
 |----------|-------|
-| Passed   | 375   |
-| Failed   | 9     |
+| Passed   | 384   |
+| Failed   | 0     |
 | Skipped  | 0     |
 | **Total**| **384** |
-| **Pass rate** | **97.7%** |
-
-### Remaining failures
-
-| Failure mode | Count | Description |
-|---|---|---|
-| Incorrect schema accepted | 6 | NCName validation (5) + datatypeLibrary URI (1) |
-| Invalid input accepted | 1 | Datatype namespace handling |
-| Test thread panicked | 2 | Crash in datatype handling |
+| **Pass rate** | **100%** |
 
 ### Progress history
 
@@ -27,6 +19,8 @@ The spectest suite (from the official RELAX NG test suite) shows:
 | Baseline (pre-Phase 1) | 266 | 118 | 69.3% |
 | After Phase 1 (Section 7 restrictions) | 348 | 36 | 90.6% |
 | After Phase 2 (Namespace + validation fixes) | 375 | 9 | 97.7% |
+| After Phase 3 (NCName/URI validation) | 381 | 3 | 99.2% |
+| After Phase 4 (QName namespace context) | 384 | 0 | 100.0% |
 
 ---
 
@@ -104,31 +98,30 @@ The README notes two known issues:
 
 ## Remaining Roadmap
 
-### Phase 3: NCName & URI Validation
+### Phase 3: NCName & URI Validation (DONE)
 
-**Impact: ~6 test fixes (to ~99.5%)**
+**Impact: +6 test fixes (from 97.7% to 99.2%)**
 
-1. **NCName start-character validation** -- Reject names starting with
-   characters that are valid XML name characters but not valid NCName start
-   characters (e.g., Thai combining marks).
+1. **NCName start-character validation** -- Added full XML 1.0 Second Edition
+   character table in `relaxng-syntax/src/ncname.rs`. Correctly rejects names
+   starting with characters that are valid XML name chars but not NCName start
+   chars (e.g., U+0E35 Thai combining mark).
 
-2. **`datatypeLibrary` URI validation** -- Validate that the attribute value is
-   an absolute URI per RFC 3986.
+2. **`datatypeLibrary` URI validation** -- Reject bare "scheme:" URIs (empty
+   path, no authority) which are invalid per RFC 2396.
 
-### Phase 4: Datatype Robustness
+### Phase 4: Datatype Namespace Context (DONE)
 
-**Impact: ~3 test fixes (to ~100%)**
+**Impact: +3 test fixes (from 99.2% to 100%)**
 
-1. **Replace panics with errors** -- Audit all `panic!()`, `unwrap()`,
-   `todo!()`, and `unimplemented!()` calls in the datatype module. Return
-   proper `RelaxError` variants instead.
+1. **QName namespace-aware compilation** -- `QNameVal` now stores the expanded
+   `(namespace_uri, local_name)` pair instead of the lexical string. Schema-side
+   namespace context (in-scope namespace declarations + RELAX NG `ns` attribute)
+   is threaded from `DatatypeValuePattern` through the compiler.
 
-2. **Implement missing XSD datatypes** -- Incrementally add support for
-   commonly used XSD datatypes and facets (the spec test suite exercises at
-   least `string`, `token`, `integer`, `decimal`, `QName`).
-
-3. **Datatype namespace context** -- Ensure namespace context is properly passed
-   during datatype validation of QName values.
+2. **QName namespace-aware validation** -- Instance-side namespace context from
+   the validator's `ElementStack` is passed to `text_deriv` and used for
+   namespace-aware QName comparison.
 
 ### Phase 5: Performance
 
@@ -153,6 +146,6 @@ The README notes two known issues:
 | Baseline | -- | -- | 69.3% (266/384) |
 | Phase 1 (done) | Section 7 restrictions | +82 | 90.6% (348/384) |
 | Phase 2 (done) | Namespace + validation fixes | +27 | 97.7% (375/384) |
-| Phase 3 | NCName/URI validation | ~+6 | ~99.5% (381/384) |
-| Phase 4 | Datatype robustness | ~+3 | ~100% (384/384) |
+| Phase 3 (done) | NCName/URI validation | +6 | 99.2% (381/384) |
+| Phase 4 (done) | QName namespace context | +3 | 100% (384/384) |
 | Phase 5 | Performance | +0 | ~100% (+ real-world usability) |

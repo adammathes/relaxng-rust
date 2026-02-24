@@ -487,6 +487,26 @@ fn value(node: Node) -> Result<DatatypeValuePattern> {
         };
         Literal(node.range(), vec![seg])
     };
+    // Collect in-scope namespace bindings for QName value resolution.
+    // Per RELAX NG spec: prefixed QNames are resolved using in-scope XML namespace declarations.
+    // The 'ns' attribute (if present) overrides the default namespace; otherwise default is "".
+    let mut ns_bindings: Vec<(String, String)> = node
+        .namespaces()
+        .map(|ns| (ns.name().unwrap_or("").to_string(), ns.uri().to_string()))
+        .collect();
+    match get_ns_att(node) {
+        Some(ns_att) => {
+            if let Some(pos) = ns_bindings.iter().position(|(p, _)| p.is_empty()) {
+                ns_bindings[pos].1 = ns_att.value().to_string();
+            } else {
+                ns_bindings.push(("".to_string(), ns_att.value().to_string()));
+            }
+        }
+        None => {
+            // No 'ns' attribute: default namespace for QName resolution is ""
+            ns_bindings.retain(|(p, _)| !p.is_empty());
+        }
+    }
     Ok(DatatypeValuePattern(
         type_name.map(|name| {
             DatatypeName::NamespacedName(NamespacedName {
@@ -495,6 +515,7 @@ fn value(node: Node) -> Result<DatatypeValuePattern> {
             })
         }),
         val,
+        ns_bindings,
     ))
 }
 
