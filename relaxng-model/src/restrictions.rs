@@ -1006,20 +1006,17 @@ fn content_type_impl(pattern: &Pattern, seen: &mut HashSet<usize>) -> ContentTyp
             ContentType::Simple
         }
         Pattern::Attribute(_, _) => ContentType::Empty,
-        Pattern::Group(members) | Pattern::Interleave(members) => {
-            members
-                .iter()
-                .map(|m| content_type_impl(m, seen))
-                .max()
-                .unwrap_or(ContentType::Empty)
-        }
-        Pattern::Choice(alts) => {
-            alts.iter()
-                .filter(|a| !is_dead(a))
-                .map(|a| content_type_impl(a, seen))
-                .max()
-                .unwrap_or(ContentType::Empty)
-        }
+        Pattern::Group(members) | Pattern::Interleave(members) => members
+            .iter()
+            .map(|m| content_type_impl(m, seen))
+            .max()
+            .unwrap_or(ContentType::Empty),
+        Pattern::Choice(alts) => alts
+            .iter()
+            .filter(|a| !is_dead(a))
+            .map(|a| content_type_impl(a, seen))
+            .max()
+            .unwrap_or(ContentType::Empty),
         Pattern::OneOrMore(p) | Pattern::ZeroOrMore(p) | Pattern::Optional(p) => {
             content_type_impl(p, seen)
         }
@@ -1030,13 +1027,16 @@ fn content_type_impl(pattern: &Pattern, seen: &mut HashSet<usize>) -> ContentTyp
 fn groupable(ct1: ContentType, ct2: ContentType) -> bool {
     matches!(
         (ct1, ct2),
-        (ContentType::Empty, _) | (_, ContentType::Empty) | (ContentType::Complex, ContentType::Complex)
+        (ContentType::Empty, _)
+            | (_, ContentType::Empty)
+            | (ContentType::Complex, ContentType::Complex)
     )
 }
 
 /// Check that all members of a group/interleave have groupable content types.
 fn check_string_sequence(members: &[Pattern], span: codemap::Span) -> Result<(), RelaxError> {
-    let types: Vec<ContentType> = members.iter()
+    let types: Vec<ContentType> = members
+        .iter()
         .filter(|m| !is_dead(m))
         .map(|m| content_type(m))
         .collect();

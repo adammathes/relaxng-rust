@@ -2,10 +2,6 @@
 //
 // Each test case validates a (schema, document) pair and checks the expected
 // outcome (valid or invalid).  Test data lives in `testdata/real-world/`.
-//
-// The three atom-valid-*.xml tests are marked #[ignore] because they trigger
-// an exponential blowup in the choice() derivative function — see Phase 6 in
-// ROADMAP.md.  All other 12 cases run cleanly in CI.
 
 use relaxng_model::{Compiler, FsFiles, Syntax};
 use relaxng_validator::Validator;
@@ -66,21 +62,17 @@ fn atom_invalid_bad_datetime() {
     );
 }
 
-// Exponential blowup in choice() derivative — tracked as Phase 6 performance work.
 #[test]
-#[ignore = "exponential blowup in choice() derivative (see ROADMAP Phase 6)"]
 fn atom_valid_minimal() {
     validate("atom.rng", "atom-valid-minimal.xml").expect("should be valid");
 }
 
 #[test]
-#[ignore = "exponential blowup in choice() derivative (see ROADMAP Phase 6)"]
 fn atom_valid_full() {
     validate("atom.rng", "atom-valid-full.xml").expect("should be valid");
 }
 
 #[test]
-#[ignore = "exponential blowup in choice() derivative (see ROADMAP Phase 6)"]
 fn atom_valid_xhtml_content() {
     validate("atom.rng", "atom-valid-xhtml-content.xml").expect("should be valid");
 }
