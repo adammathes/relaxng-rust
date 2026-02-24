@@ -1,3 +1,4 @@
+use crate::ncname::{is_nc_name_char, is_nc_name_start_char};
 use crate::types::*;
 use roxmltree::{Attribute, Node};
 use std::ops::Range;
@@ -96,6 +97,14 @@ fn check_standard_attrs(node: Node) -> Result<()> {
                         Err(Error::Unexpected(
                             dt_lib.range_value(),
                             "Datatype library URI must not include a fragment identifier",
+                        ))
+                    } else if uri.authority().is_none() && uri.path().as_str().is_empty() {
+                        // RFC 2396 absolute-URI requires either a net-path/abs-path (hier-part)
+                        // or a non-empty opaque-part after the scheme colon. A bare "scheme:"
+                        // with nothing following is not a valid absolute URI per RFC 2396.
+                        Err(Error::Unexpected(
+                            dt_lib.range_value(),
+                            "Datatype library URI must have non-empty path or authority",
                         ))
                     } else {
                         Ok(())
@@ -478,6 +487,26 @@ fn value(node: Node) -> Result<DatatypeValuePattern> {
         };
         Literal(node.range(), vec![seg])
     };
+    // Collect in-scope namespace bindings for QName value resolution.
+    // Per RELAX NG spec: prefixed QNames are resolved using in-scope XML namespace declarations.
+    // The 'ns' attribute (if present) overrides the default namespace; otherwise default is "".
+    let mut ns_bindings: Vec<(String, String)> = node
+        .namespaces()
+        .map(|ns| (ns.name().unwrap_or("").to_string(), ns.uri().to_string()))
+        .collect();
+    match get_ns_att(node) {
+        Some(ns_att) => {
+            if let Some(pos) = ns_bindings.iter().position(|(p, _)| p.is_empty()) {
+                ns_bindings[pos].1 = ns_att.value().to_string();
+            } else {
+                ns_bindings.push(("".to_string(), ns_att.value().to_string()));
+            }
+        }
+        None => {
+            // No 'ns' attribute: default namespace for QName resolution is ""
+            ns_bindings.retain(|(p, _)| !p.is_empty());
+        }
+    }
     Ok(DatatypeValuePattern(
         type_name.map(|name| {
             DatatypeName::NamespacedName(NamespacedName {
@@ -486,6 +515,7 @@ fn value(node: Node) -> Result<DatatypeValuePattern> {
             })
         }),
         val,
+        ns_bindings,
     ))
 }
 
@@ -935,35 +965,6 @@ fn ident(range: Range<usize>, val: &str) -> Result<Identifier> {
     Ok(Identifier(range, val.to_string()))
 }
 
-fn is_nc_name_start_char(c: char) -> bool {
-    matches!(c, 'A'..='Z'
-        | '_'
-        | 'a'..='z'
-        | '\u{C0}'..='\u{D6}'
-        | '\u{D8}'..='\u{F6}'
-        | '\u{F8}'..='\u{2FF}'
-        | '\u{370}'..='\u{37D}'
-        | '\u{37F}'..='\u{1FFF}'
-        | '\u{200C}'..='\u{200D}'
-        | '\u{2070}'..='\u{218F}'
-        | '\u{2C00}'..='\u{2FEF}'
-        | '\u{3001}'..='\u{D7FF}'
-        | '\u{F900}'..='\u{FDCF}'
-        | '\u{FDF0}'..='\u{FFFD}'
-        | '\u{10000}'..='\u{EFFFF}')
-}
-fn is_nc_name_char(c: char) -> bool {
-    if is_nc_name_start_char(c) {
-        true
-    } else {
-        matches!(c, '-'
-            | '.'
-            | '0'..='9'
-            | '\u{B7}'
-            | '\u{0300}'..='\u{036F}'
-            | '\u{203F}'..='\u{2040}')
-    }
-}
 
 fn is_el(node: Node, name: &'static str) -> bool {
     node.is_element() && node.tag_name().name() == name && is_rng_node(node)

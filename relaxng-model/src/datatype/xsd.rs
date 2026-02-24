@@ -21,9 +21,21 @@ impl super::Datatype for XsdDatatypeValues {
         match self {
             XsdDatatypeValues::String(s) => s == value,
             XsdDatatypeValues::Token(s) => s == &normalize_whitespace(value),
-            XsdDatatypeValues::QName(v) => QNameVal::try_from_val(value)
-                .map(|value| &value == v)
+            // QName validation requires namespace context; is_valid_with_ns should be used instead.
+            // Without namespace context we cannot resolve prefixes, so we return false.
+            XsdDatatypeValues::QName(_) => false,
+        }
+    }
+}
+
+impl XsdDatatypeValues {
+    pub fn is_valid_with_ns(&self, value: &str, ns: &dyn super::Namespaces) -> bool {
+        use super::Datatype as _;
+        match self {
+            XsdDatatypeValues::QName(v) => QNameVal::from_val_with_dyn_ns(value, ns)
+                .map(|val| &val == v)
                 .unwrap_or(false),
+            _ => self.is_valid(value),
         }
     }
 }
@@ -571,10 +583,11 @@ impl super::DatatypeCompiler for Compiler {
         ctx: &Context,
         datatype_name: &types::DatatypeName,
         value: &str,
+        ns: &[(String, String)],
     ) -> Result<Self::DTValue, Self::Error> {
         match datatype_name {
             DatatypeName::CName(types::QName(_namespace_uri, name)) => {
-                self.compile_value(ctx, &name.0, &name.1, value)
+                self.compile_value(ctx, &name.0, &name.1, value, ns)
             }
             DatatypeName::NamespacedName(_) => {
                 unimplemented!()
@@ -769,12 +782,13 @@ impl Compiler {
         span: &types::Span,
         name: &str,
         value: &str,
+        ns: &[(String, String)],
     ) -> Result<XsdDatatypeValues, XsdDatatypeError> {
         match name {
             "string" => Ok(XsdDatatypeValues::String(value.to_string())),
             "token" => Ok(XsdDatatypeValues::Token(normalize_whitespace(value))),
             "QName" => Ok(XsdDatatypeValues::QName(
-                QNameVal::try_from_val(value).map_err(|_| {
+                QNameVal::from_val_with_ns_slice(value, ns).map_err(|_| {
                     XsdDatatypeError::InvalidValueOfType {
                         span: ctx.convert_span(span),
                         type_name: "QName",
@@ -1443,25 +1457,56 @@ impl Compiler {
     }
 }
 
-trait TryFromVal: Sized {
-    fn try_from_val(value: &str) -> Result<Self, ()>;
-}
-
+/// XSD QName value in the value-space: (namespace_uri, local_name).
+/// The namespace_uri is "" for names in no namespace.
 #[derive(PartialEq, Eq, Hash, Clone, Debug)]
-pub struct QNameVal(String);
-impl TryFromVal for QNameVal {
-    fn try_from_val(val: &str) -> Result<Self, ()> {
+pub struct QNameVal(String, String);
+
+impl QNameVal {
+    /// Resolve a QName string using a slice of (prefix, namespace_uri) bindings.
+    pub(crate) fn from_val_with_ns_slice(val: &str, ns: &[(String, String)]) -> Result<Self, ()> {
         if let Some(pos) = val.find(':') {
             let prefix = &val[0..pos];
             let localname = &val[pos + 1..];
             if is_valid_ncname(prefix) && is_valid_ncname(localname) {
-                unimplemented!("Need to be able to look up prefix {:?}", prefix);
-            //Ok(QNameVal(val.to_string()))
+                let ns_uri = ns
+                    .iter()
+                    .find(|(p, _)| p == prefix)
+                    .map(|(_, u)| u.as_str())
+                    .ok_or(())?;
+                Ok(QNameVal(ns_uri.to_string(), localname.to_string()))
             } else {
                 Err(())
             }
         } else if is_valid_ncname(val) {
-            Ok(QNameVal(val.to_string()))
+            let default_ns = ns
+                .iter()
+                .find(|(p, _)| p.is_empty())
+                .map(|(_, u)| u.as_str())
+                .unwrap_or("");
+            Ok(QNameVal(default_ns.to_string(), val.to_string()))
+        } else {
+            Err(())
+        }
+    }
+
+    /// Resolve a QName string using a dynamic namespace context (for instance validation).
+    pub(crate) fn from_val_with_dyn_ns(
+        val: &str,
+        ns: &dyn super::Namespaces,
+    ) -> Result<Self, ()> {
+        if let Some(pos) = val.find(':') {
+            let prefix = &val[0..pos];
+            let localname = &val[pos + 1..];
+            if is_valid_ncname(prefix) && is_valid_ncname(localname) {
+                let ns_uri = ns.resolve(prefix).ok_or(())?;
+                Ok(QNameVal(ns_uri.to_string(), localname.to_string()))
+            } else {
+                Err(())
+            }
+        } else if is_valid_ncname(val) {
+            let default_ns = ns.resolve("").unwrap_or("");
+            Ok(QNameVal(default_ns.to_string(), val.to_string()))
         } else {
             Err(())
         }
