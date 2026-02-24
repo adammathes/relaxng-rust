@@ -73,6 +73,7 @@ impl super::DatatypeCompiler for Compiler {
         ctx: &Context,
         name: &DatatypeName,
         value: &str,
+        _ns: &[(String, String)],
     ) -> Result<Self::DTValue, Self::Error> {
         Ok(match name {
             DatatypeName::String => BuiltinDatatypeValue::StringValue(value.to_string()),
