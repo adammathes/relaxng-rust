@@ -22,6 +22,7 @@ use std::sync::Arc;
 
 pub mod datatype;
 pub mod model;
+pub mod restrictions;
 
 // TODO:
 //  - Detect ambiguous grammars per https://www.kohsuke.org/relaxng/ambiguity/AmbiguousGrammarDetection.pdf
@@ -164,6 +165,22 @@ pub enum RelaxError {
         include_span: codemap::Span,
         name: String,
     },
+    /// Section 7 restriction: a pattern type appears in a context where it is forbidden
+    RestrictedPattern {
+        span: codemap::Span,
+        pattern_name: String,
+        context: String,
+    },
+    /// Section 7.1.1: attribute named "xmlns" is forbidden
+    XmlnsAttributeForbidden,
+    /// Section 7.1.1: attribute in xmlns namespace is forbidden
+    XmlnsNamespaceForbidden,
+    /// Section 7.1.1: anyName in except of anyName is forbidden
+    AnyNameInExcept,
+    /// Section 7.1.1: anyName in except of nsName is forbidden
+    AnyNameInNsNameExcept,
+    /// Section 7.1.1: nsName in except of nsName is forbidden
+    NsNameInNsNameExcept,
 }
 
 enum Context<'a> {
@@ -712,6 +729,12 @@ impl<FS: Files> Compiler<FS> {
             let mut seen = HashSet::new();
             // TODO: this is a temporary hack to detect bad references; do this in a better way?
             self.check(&mut seen, start.borrow().as_ref().unwrap().pattern())?;
+            // Section 7 restriction checking
+            {
+                let borrowed = start.borrow();
+                let rule = borrowed.as_ref().unwrap();
+                restrictions::check_restrictions(rule, *rule.span())?;
+            }
             Ok(start)
         } else {
             Err(RelaxError::StartRuleNotDefined { span: file.span })
@@ -1172,6 +1195,37 @@ impl<FS: Files> Compiler<FS> {
                     spans: vec![label],
                 }
             }
+            RelaxError::RestrictedPattern {
+                span,
+                pattern_name,
+                context,
+            } => {
+                let label = codemap_diagnostic::SpanLabel {
+                    span: *span,
+                    style: codemap_diagnostic::SpanStyle::Primary,
+                    label: Some(format!("'{pattern_name}' not allowed here")),
+                };
+                codemap_diagnostic::Diagnostic {
+                    level: codemap_diagnostic::Level::Error,
+                    message: format!(
+                        "Pattern '{pattern_name}' is not allowed in '{context}' context (section 7)"
+                    ),
+                    code: None,
+                    spans: vec![label],
+                }
+            }
+            RelaxError::XmlnsAttributeForbidden => codemap_diagnostic::Diagnostic {
+                level: codemap_diagnostic::Level::Error,
+                message: "Attribute named 'xmlns' is forbidden (section 7.1.1)".to_string(),
+                code: None,
+                spans: vec![],
+            },
+            RelaxError::XmlnsNamespaceForbidden => codemap_diagnostic::Diagnostic {
+                level: codemap_diagnostic::Level::Error,
+                message: "Attribute in 'http://www.w3.org/2000/xmlns' namespace is forbidden (section 7.1.1)".to_string(),
+                code: None,
+                spans: vec![],
+            },
             _ => panic!("{err:?}"),
         }
     }
