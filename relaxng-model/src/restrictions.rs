@@ -62,8 +62,10 @@ fn is_dead(pattern: &Pattern) -> bool {
         Pattern::Optional(_) => false, // optional(X) = choice(X, empty), and empty is not dead
         // An attribute whose content is dead can never be satisfied
         Pattern::Attribute(_, content) => is_dead(content),
-        // An element whose content is dead can never be satisfied
-        Pattern::Element(_, content) => is_dead(content),
+        // Element(nc, notAllowed) does NOT simplify to notAllowed per the spec.
+        // The element is structurally present even if its content is notAllowed,
+        // and section 7 restrictions still apply to surrounding patterns.
+        Pattern::Element(_, _) => false,
         _ => false,
     }
 }
@@ -232,6 +234,16 @@ fn check_pattern(
             // Check name class restrictions (anyName/nsName except rules)
             check_name_class(name_class)?;
 
+            // 7.3: attribute with infinite name class (anyName/nsName) must be
+            // inside oneOrMore
+            if name_class_is_infinite(name_class) && !ctx.in_one_or_more {
+                return Err(restricted(
+                    span,
+                    "attribute with infinite name class",
+                    "outside oneOrMore",
+                ));
+            }
+
             let mut child_ctx = ctx.clone();
             child_ctx.in_attribute = true;
             check_pattern(content, &child_ctx, span, seen)
@@ -275,6 +287,11 @@ fn check_pattern(
             if ctx.in_data_except {
                 return Err(restricted(span, "group", "data/except"));
             }
+            // 7.2: check string sequence restriction (content types must be groupable)
+            // Inside list, group of data/value is allowed (whitespace-separated tokens)
+            if !ctx.in_list {
+                check_string_sequence(members, span)?;
+            }
             // 7.3: check for overlapping attribute name classes within the group
             check_group_attribute_overlap(members, span)?;
 
@@ -302,6 +319,8 @@ fn check_pattern(
             if ctx.in_data_except {
                 return Err(restricted(span, "interleave", "data/except"));
             }
+            // 7.2: check string sequence restriction (content types must be groupable)
+            check_string_sequence(members, span)?;
             // 7.4: check for overlapping elements and duplicate text across
             // interleave branches
             check_interleave_restrictions(members, span)?;
@@ -930,6 +949,84 @@ fn content_is_empty(pattern: &Pattern) -> bool {
         Pattern::Empty | Pattern::NotAllowed => true,
         _ => false,
     }
+}
+
+// --- 7.2: Content type / string sequence checking ---
+//
+// Each pattern has a "content type": empty, complex, or simple.
+// - empty: Empty, NotAllowed
+// - complex: Element
+// - simple: Data, Value, List, Text
+// Group and Interleave require that their children's content types are "groupable":
+//   groupable(empty, _) = true
+//   groupable(_, empty) = true
+//   groupable(complex, complex) = true
+//   everything else = false
+// So: simple is NOT groupable with simple or complex.
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum ContentType {
+    Empty,
+    Complex,
+    Simple,
+}
+
+/// Compute the content type of a pattern (for section 7.2 checking).
+/// Per spec: text=complex, element=complex, ref=complex,
+/// data/value/list=simple, empty/attribute=empty, notAllowed=empty.
+fn content_type(pattern: &Pattern) -> ContentType {
+    if is_dead(pattern) {
+        return ContentType::Empty;
+    }
+    match pattern {
+        Pattern::Empty | Pattern::NotAllowed => ContentType::Empty,
+        Pattern::Element(_, _) => ContentType::Complex,
+        Pattern::Text => ContentType::Complex,
+        Pattern::Ref(_, _, _) => ContentType::Complex,
+        Pattern::DatatypeValue { .. } | Pattern::DatatypeName { .. } | Pattern::List(_) => {
+            ContentType::Simple
+        }
+        Pattern::Attribute(_, _) => ContentType::Empty,
+        Pattern::Group(members) | Pattern::Interleave(members) => {
+            members
+                .iter()
+                .map(|m| content_type(m))
+                .max()
+                .unwrap_or(ContentType::Empty)
+        }
+        Pattern::Choice(alts) => {
+            alts.iter()
+                .filter(|a| !is_dead(a))
+                .map(|a| content_type(a))
+                .max()
+                .unwrap_or(ContentType::Empty)
+        }
+        Pattern::OneOrMore(p) | Pattern::ZeroOrMore(p) | Pattern::Optional(p) => content_type(p),
+        Pattern::Mixed(_) => ContentType::Complex, // mixed = interleave(text, ...) and text is complex
+    }
+}
+
+fn groupable(ct1: ContentType, ct2: ContentType) -> bool {
+    matches!(
+        (ct1, ct2),
+        (ContentType::Empty, _) | (_, ContentType::Empty) | (ContentType::Complex, ContentType::Complex)
+    )
+}
+
+/// Check that all members of a group/interleave have groupable content types.
+fn check_string_sequence(members: &[Pattern], span: codemap::Span) -> Result<(), RelaxError> {
+    let types: Vec<ContentType> = members.iter()
+        .filter(|m| !is_dead(m))
+        .map(|m| content_type(m))
+        .collect();
+    for i in 0..types.len() {
+        for j in (i + 1)..types.len() {
+            if !groupable(types[i], types[j]) {
+                return Err(restricted(span, "string sequence", "group/interleave"));
+            }
+        }
+    }
+    Ok(())
 }
 
 // --- Helper to construct a restriction error ---
