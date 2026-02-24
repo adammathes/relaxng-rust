@@ -1,3 +1,5 @@
+# warning - vibe coded experimental fork, play with at your own risk
+
 # relaxng-rust
 
 [Rust](/home/dave/projects/relaxng-rust/README.md) implementation of the [RELAX NG](https://relaxng.org/) XML schema language.
