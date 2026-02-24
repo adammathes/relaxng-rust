@@ -309,7 +309,7 @@
     <element name="copyright">
       <ref name="db.common.attributes"/>
       <zeroOrMore>
-        <element name="year"><data type="string"/></element>
+        <element name="year"><data type="gYear" datatypeLibrary="http://www.w3.org/2001/XMLSchema-datatypes"/></element>
       </zeroOrMore>
       <optional>
         <element name="holder"><text/></element>
