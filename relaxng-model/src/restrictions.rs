@@ -24,10 +24,10 @@ pub fn check_restrictions(
     let mut seen = HashSet::new();
     check_start(pattern, start_span, &mut seen)?;
 
-    // Walk the full pattern tree for remaining restrictions
+    // Walk the full pattern tree for remaining restrictions (7.1.1-7.1.4, 7.3)
     let mut seen = HashSet::new();
     let ctx = WalkContext::default();
-    check_pattern(pattern, &ctx, &mut seen)?;
+    check_pattern(pattern, &ctx, start_span, &mut seen)?;
 
     Ok(())
 }
@@ -64,34 +64,29 @@ fn check_start(
         Pattern::Ref(_ref_span, _name, pat_ref) => {
             let ptr = pat_ref.0.as_ptr() as usize;
             if seen.contains(&ptr) {
-                // Already visited this ref -- avoid infinite loops.
-                // A recursive ref that only contains refs/choices without
-                // ever reaching an element is arguably invalid, but we
-                // let it pass here since it will fail at validation time.
                 return Ok(());
             }
             seen.insert(ptr);
             if let Some(rule) = pat_ref.0.borrow().as_ref() {
                 check_start(rule.pattern(), span, seen)
             } else {
-                // Unresolved ref -- should have been caught earlier
                 Ok(())
             }
         }
 
         // Everything else is forbidden under start
-        Pattern::Text => Err(RestrictedPattern(span, "text", "start")),
-        Pattern::Empty => Err(RestrictedPattern(span, "empty", "start")),
-        Pattern::Attribute(_, _) => Err(RestrictedPattern(span, "attribute", "start")),
-        Pattern::List(_) => Err(RestrictedPattern(span, "list", "start")),
-        Pattern::Group(_) => Err(RestrictedPattern(span, "group", "start")),
-        Pattern::Interleave(_) => Err(RestrictedPattern(span, "interleave", "start")),
-        Pattern::OneOrMore(_) => Err(RestrictedPattern(span, "oneOrMore", "start")),
-        Pattern::ZeroOrMore(_) => Err(RestrictedPattern(span, "zeroOrMore", "start")),
-        Pattern::Optional(_) => Err(RestrictedPattern(span, "optional", "start")),
-        Pattern::Mixed(_) => Err(RestrictedPattern(span, "mixed", "start")),
-        Pattern::DatatypeValue { .. } => Err(RestrictedPattern(span, "value", "start")),
-        Pattern::DatatypeName { .. } => Err(RestrictedPattern(span, "data", "start")),
+        Pattern::Text => Err(restricted(span, "text", "start")),
+        Pattern::Empty => Err(restricted(span, "empty", "start")),
+        Pattern::Attribute(_, _) => Err(restricted(span, "attribute", "start")),
+        Pattern::List(_) => Err(restricted(span, "list", "start")),
+        Pattern::Group(_) => Err(restricted(span, "group", "start")),
+        Pattern::Interleave(_) => Err(restricted(span, "interleave", "start")),
+        Pattern::OneOrMore(_) => Err(restricted(span, "oneOrMore", "start")),
+        Pattern::ZeroOrMore(_) => Err(restricted(span, "zeroOrMore", "start")),
+        Pattern::Optional(_) => Err(restricted(span, "optional", "start")),
+        Pattern::Mixed(_) => Err(restricted(span, "mixed", "start")),
+        Pattern::DatatypeValue { .. } => Err(restricted(span, "value", "start")),
+        Pattern::DatatypeName { .. } => Err(restricted(span, "data", "start")),
     }
 }
 
@@ -104,108 +99,177 @@ struct WalkContext {
     in_list: bool,
     /// Inside `data/except` (7.1.4)
     in_data_except: bool,
-    /// Inside an `attribute` pattern -- used for xmlns checks (7.1.1)
+    /// Inside an `attribute` pattern (7.1.1)
     in_attribute: bool,
-    /// Inside a `oneOrMore` pattern (7.1.2)
+    /// Inside a `oneOrMore` (or `zeroOrMore`) pattern (7.1.2)
     in_one_or_more: bool,
+    /// Inside a `group` or `interleave` that is itself inside a `oneOrMore` (7.1.2)
+    in_one_or_more_group: bool,
 }
 
 fn check_pattern(
     pattern: &Pattern,
     ctx: &WalkContext,
+    span: codemap::Span,
     seen: &mut HashSet<usize>,
 ) -> Result<(), RelaxError> {
     match pattern {
-        Pattern::Element(_name_class, content) => {
-            // Check name class restrictions for elements within certain contexts
-            check_pattern(content, &WalkContext::default(), seen)
+        Pattern::Element(name_class, content) => {
+            // Check name class restrictions
+            check_name_class(name_class)?;
+            // Element creates a new context boundary -- reset all flags
+            check_pattern(content, &WalkContext::default(), span, seen)
         }
 
         Pattern::Attribute(name_class, content) => {
+            // 7.1.1: attribute inside attribute is forbidden
+            if ctx.in_attribute {
+                return Err(restricted(span, "attribute", "attribute"));
+            }
+            // 7.1.3: attribute inside list is forbidden
+            if ctx.in_list {
+                return Err(restricted(span, "attribute", "list"));
+            }
+            // 7.1.4: attribute inside data/except is forbidden
+            if ctx.in_data_except {
+                return Err(restricted(span, "attribute", "data/except"));
+            }
+            // 7.1.2: attribute inside group/interleave inside oneOrMore is forbidden
+            if ctx.in_one_or_more_group {
+                return Err(restricted(span, "attribute", "oneOrMore//group"));
+            }
+
             // 7.1.1: xmlns attribute restrictions
             check_attribute_name_class(name_class)?;
 
+            // Check name class restrictions
+            check_name_class(name_class)?;
+
             let mut child_ctx = ctx.clone();
             child_ctx.in_attribute = true;
-            check_pattern(content, &child_ctx, seen)
+            check_pattern(content, &child_ctx, span, seen)
         }
 
         Pattern::List(content) => {
-            // 7.1.3: list restrictions -- set the in_list flag
+            // 7.1.3: list inside list is forbidden
+            if ctx.in_list {
+                return Err(restricted(span, "list", "list"));
+            }
+            // 7.1.4: list inside data/except is forbidden
+            if ctx.in_data_except {
+                return Err(restricted(span, "list", "data/except"));
+            }
             let mut child_ctx = ctx.clone();
             child_ctx.in_list = true;
-
-            // list inside list is forbidden
-            if ctx.in_list {
-                // We'll catch this when we enter - check the content now
-            }
-            check_pattern(content, &child_ctx, seen)
+            check_pattern(content, &child_ctx, span, seen)
         }
 
         Pattern::DatatypeName { except, .. } => {
             if let Some(except_pat) = except {
                 let mut child_ctx = ctx.clone();
                 child_ctx.in_data_except = true;
-                check_pattern(except_pat, &child_ctx, seen)?;
+                check_pattern(except_pat, &child_ctx, span, seen)?;
             }
             Ok(())
         }
 
         Pattern::Choice(alternatives) => {
             for alt in alternatives {
-                check_pattern(alt, ctx, seen)?;
+                check_pattern(alt, ctx, span, seen)?;
             }
             Ok(())
         }
 
         Pattern::Group(members) => {
-            // 7.1.4: group is forbidden in data/except
+            // 7.1.4: group inside data/except is forbidden
             if ctx.in_data_except {
-                // We don't have a span here, so we'll need to catch this another way
+                return Err(restricted(span, "group", "data/except"));
+            }
+            // 7.1.2: entering group while inside oneOrMore activates the
+            // oneOrMore//group//attribute restriction
+            let mut child_ctx = ctx.clone();
+            if ctx.in_one_or_more {
+                child_ctx.in_one_or_more_group = true;
             }
             for m in members {
-                check_pattern(m, ctx, seen)?;
+                check_pattern(m, &child_ctx, span, seen)?;
             }
             Ok(())
         }
 
         Pattern::Interleave(members) => {
-            // 7.1.3: interleave is forbidden in list
-            // 7.1.4: interleave is forbidden in data/except
+            // 7.1.3: interleave inside list is forbidden
+            if ctx.in_list {
+                return Err(restricted(span, "interleave", "list"));
+            }
+            // 7.1.4: interleave inside data/except is forbidden
+            if ctx.in_data_except {
+                return Err(restricted(span, "interleave", "data/except"));
+            }
+            // 7.1.2: entering interleave while inside oneOrMore activates the
+            // oneOrMore//interleave//attribute restriction
+            let mut child_ctx = ctx.clone();
+            if ctx.in_one_or_more {
+                child_ctx.in_one_or_more_group = true;
+            }
             for m in members {
-                check_pattern(m, ctx, seen)?;
+                check_pattern(m, &child_ctx, span, seen)?;
             }
             Ok(())
         }
 
         Pattern::Mixed(content) => {
-            // Mixed = interleave(text, content). Apply same restrictions as interleave.
-            check_pattern(content, ctx, seen)
+            // Mixed = interleave(text, content)
+            // 7.1.3: interleave (and text) inside list is forbidden
+            if ctx.in_list {
+                return Err(restricted(span, "interleave", "list"));
+            }
+            // 7.1.4: interleave inside data/except is forbidden
+            if ctx.in_data_except {
+                return Err(restricted(span, "interleave", "data/except"));
+            }
+            let mut child_ctx = ctx.clone();
+            if ctx.in_one_or_more {
+                child_ctx.in_one_or_more_group = true;
+            }
+            check_pattern(content, &child_ctx, span, seen)
         }
 
         Pattern::OneOrMore(content) => {
+            // 7.1.4: oneOrMore inside data/except is forbidden
+            if ctx.in_data_except {
+                return Err(restricted(span, "oneOrMore", "data/except"));
+            }
             let mut child_ctx = ctx.clone();
             child_ctx.in_one_or_more = true;
-            // 7.1.4: oneOrMore is forbidden in data/except
-            check_pattern(content, &child_ctx, seen)
+            check_pattern(content, &child_ctx, span, seen)
         }
 
         Pattern::ZeroOrMore(content) => {
+            // ZeroOrMore simplifies to choice(oneOrMore(content), empty)
+            // 7.1.4: oneOrMore inside data/except is forbidden
+            if ctx.in_data_except {
+                return Err(restricted(span, "oneOrMore", "data/except"));
+            }
             let mut child_ctx = ctx.clone();
             child_ctx.in_one_or_more = true;
-            check_pattern(content, &child_ctx, seen)
+            check_pattern(content, &child_ctx, span, seen)
         }
 
-        Pattern::Optional(content) => check_pattern(content, ctx, seen),
+        Pattern::Optional(content) => check_pattern(content, ctx, span, seen),
 
-        Pattern::Ref(_span, _name, pat_ref) => {
+        Pattern::Ref(_ref_span, _name, pat_ref) => {
+            // Follow refs and check the resolved pattern in the current context.
+            // In the fully simplified schema, refs would be forbidden in certain
+            // contexts (list, data/except, attribute). But in our representation,
+            // we follow refs through instead since we haven't fully simplified.
             let ptr = pat_ref.0.as_ptr() as usize;
             if seen.contains(&ptr) {
                 return Ok(());
             }
             seen.insert(ptr);
             if let Some(rule) = pat_ref.0.borrow().as_ref() {
-                check_pattern(rule.pattern(), ctx, seen)
+                check_pattern(rule.pattern(), ctx, span, seen)
             } else {
                 Ok(())
             }
@@ -214,16 +278,53 @@ fn check_pattern(
         // Leaf patterns -- check context restrictions
         Pattern::Text => {
             // 7.1.3: text forbidden in list
+            if ctx.in_list {
+                return Err(restricted(span, "text", "list"));
+            }
             // 7.1.4: text forbidden in data/except
+            if ctx.in_data_except {
+                return Err(restricted(span, "text", "data/except"));
+            }
             Ok(())
         }
 
         Pattern::Empty => {
             // 7.1.4: empty forbidden in data/except
+            if ctx.in_data_except {
+                return Err(restricted(span, "empty", "data/except"));
+            }
             Ok(())
         }
 
-        Pattern::NotAllowed | Pattern::DatatypeValue { .. } => Ok(()),
+        Pattern::NotAllowed => Ok(()),
+
+        Pattern::DatatypeValue { .. } => Ok(()),
+    }
+}
+
+// --- Name class restriction checking ---
+
+/// Check name class restrictions (7.1.1): anyName/nsName except rules
+fn check_name_class(name_class: &NameClass) -> Result<(), RelaxError> {
+    match name_class {
+        NameClass::AnyName { except } => {
+            if let Some(except) = except {
+                check_anyname_except(except)?;
+            }
+            Ok(())
+        }
+        NameClass::NsName { except, .. } => {
+            if let Some(except) = except {
+                check_nsname_except(except)?;
+            }
+            Ok(())
+        }
+        NameClass::Alt { a, b } => {
+            check_name_class(a)?;
+            check_name_class(b)?;
+            Ok(())
+        }
+        NameClass::Named { .. } => Ok(()),
     }
 }
 
@@ -235,10 +336,6 @@ fn check_pattern(
 const XMLNS_NAMESPACE: &str = "http://www.w3.org/2000/xmlns";
 
 fn check_attribute_name_class(name_class: &NameClass) -> Result<(), RelaxError> {
-    check_name_class_for_xmlns(name_class)
-}
-
-fn check_name_class_for_xmlns(name_class: &NameClass) -> Result<(), RelaxError> {
     match name_class {
         NameClass::Named {
             namespace_uri,
@@ -260,27 +357,19 @@ fn check_name_class_for_xmlns(name_class: &NameClass) -> Result<(), RelaxError> 
                 return Err(RelaxError::XmlnsNamespaceForbidden);
             }
             if let Some(except) = except {
-                check_name_class_for_xmlns(except)?;
+                check_attribute_name_class(except)?;
             }
             Ok(())
         }
         NameClass::AnyName { except } => {
-            // anyName in an attribute context can match xmlns -- this is only OK
-            // if the except clause explicitly excludes xmlns. But the spec says
-            // this is still forbidden because anyName can match xmlns.
-            // However, we should not error on anyName itself -- the restriction is
-            // about names that ARE xmlns, not names that COULD BE xmlns.
-            // Actually, per the spec, anyName and nsName in attribute context are
-            // restricted by section 7.3 (must have oneOrMore ancestor) but are not
-            // themselves xmlns violations.
             if let Some(except) = except {
-                check_name_class_for_xmlns(except)?;
+                check_attribute_name_class(except)?;
             }
             Ok(())
         }
         NameClass::Alt { a, b } => {
-            check_name_class_for_xmlns(a)?;
-            check_name_class_for_xmlns(b)?;
+            check_attribute_name_class(a)?;
+            check_attribute_name_class(b)?;
             Ok(())
         }
     }
@@ -324,8 +413,7 @@ fn check_nsname_except(except: &NameClass) -> Result<(), RelaxError> {
 
 // --- Helper to construct a restriction error ---
 
-#[allow(non_snake_case)]
-fn RestrictedPattern(span: codemap::Span, pattern_name: &str, context: &str) -> RelaxError {
+fn restricted(span: codemap::Span, pattern_name: &str, context: &str) -> RelaxError {
     RelaxError::RestrictedPattern {
         span,
         pattern_name: pattern_name.to_string(),
