@@ -123,7 +123,90 @@ The README notes two known issues:
    the validator's `ElementStack` is passed to `text_deriv` and used for
    namespace-aware QName comparison.
 
-### Phase 5: Performance
+### Phase 5: Real-World Schema Testing
+
+**Goal: validate the implementation against real schemas and real documents;
+find and fix bugs not covered by the spectest suite.**
+
+The spectest suite exercises the RELAX NG *specification* exhaustively but uses
+synthetic schemas and tiny documents. Real-world schemas exercise different
+failure modes: deeply recursive grammars, mixed-content prose, XSD datatype
+coverage, multi-file includes, and large documents.
+
+#### Methodology
+
+Use **Jing** (the reference Java implementation) as a ground-truth oracle:
+
+```
+# Install: apt install jing  OR  brew install jing
+jing schema.rng document.xml   # exit 0 = valid, exit 1 = invalid
+cargo run -p relaxng-tool -- validate schema.rng document.xml
+```
+
+A divergence (one tool says valid, the other invalid) indicates a bug. Collect
+a small test corpus of `(schema, document, expected_result)` triples and wire
+them into `tests/real_world.rs` so regressions are caught automatically.
+
+#### Target schemas (priority order)
+
+**Tier 1 — start here (schemas are small/medium, documents easy to obtain)**
+
+| Schema | Why it's valuable | Key edge cases |
+|---|---|---|
+| **Atom 1.0** (RFC 4287) | Ubiquitous feed format; concise schema | `xsd:anyURI`, `xsd:dateTime`, namespace extension points |
+| **XHTML 1.0 Strict** | Real prose documents; well-known | Mixed content, `id`/`idref`, character data rules |
+| **DocBook 5.x** (`.rnc`) | Recursive sections, rich attribute set | Deep recursion, complex name classes, `xsd:NMTOKEN` |
+
+**Tier 2 — heavier stress tests**
+
+| Schema | Why it's valuable | Key edge cases |
+|---|---|---|
+| **ODF / OpenDocument** | ISO standard; massive interleave | 10+ namespaces, measurement datatypes, large real `.odt` files |
+| **TEI P5** | Extreme pattern complexity | Deeply nested choice/interleave, large scholarly XML |
+| **DITA** (base topic) | Multi-file `include`, specialisations | Override resolution, modular grammar assembly |
+
+#### Expected bug surfaces
+
+Based on what real-world schemas exercise versus the spectest corpus:
+
+1. **XSD datatype coverage** — real schemas routinely use `xsd:date`,
+   `xsd:integer`, `xsd:decimal`, `xsd:anyURI`, `xsd:NMTOKEN`, `xsd:language`,
+   `xsd:ID`/`xsd:IDREF`. Several of these currently panic instead of
+   returning errors (README note). Fixing panics → proper errors is a
+   prerequisite for real-world use.
+
+2. **Mixed-content documents** — prose XML with text nodes interleaved between
+   elements. The spectest has limited mixed-content coverage; DocBook/XHTML
+   documents will exercise this path heavily.
+
+3. **Multi-file schemas via `include`** — DocBook, DITA, and TEI all split the
+   schema across many files. This exercises the `Compiler`'s file-resolution
+   and include-override logic under real conditions.
+
+4. **`anyName` / `nsName` wildcards** — ODF and DITA use open content models
+   (`anyName` with `except`). The restriction checker and validator both need
+   to handle these in the context of large real documents.
+
+5. **Error message quality** — the spectest only checks pass/fail. Real-world
+   use requires actionable error messages: which element, which attribute,
+   what was expected. A secondary goal is comparing error *locations* against
+   Jing output.
+
+6. **Stack overflow on large/deep documents** — the derivative algorithm is
+   recursive. A DocBook book or large ODF spreadsheet may overflow the default
+   stack. May require `stacker` or iterative reformulation.
+
+#### Deliverables
+
+- `tests/real_world.rs` — integration test file, initially gated behind
+  `#[ignore]` or a feature flag so CI doesn't require internet access
+- A `testdata/real-world/` directory with self-contained `(schema, document)`
+  pairs at small enough size to commit
+- A `BUGS.md` or issue list tracking every divergence found vs. Jing
+
+---
+
+### Phase 6: Performance
 
 **Impact: no test fixes, but critical for real-world use**
 
@@ -148,4 +231,5 @@ The README notes two known issues:
 | Phase 2 (done) | Namespace + validation fixes | +27 | 97.7% (375/384) |
 | Phase 3 (done) | NCName/URI validation | +6 | 99.2% (381/384) |
 | Phase 4 (done) | QName namespace context | +3 | 100% (384/384) |
-| Phase 5 | Performance | +0 | ~100% (+ real-world usability) |
+| Phase 5 | Real-world schema testing | bugs TBD | 100% + real-world coverage |
+| Phase 6 | Performance | +0 | ~100% (+ real-world usability) |
