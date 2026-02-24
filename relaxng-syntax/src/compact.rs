@@ -1,3 +1,4 @@
+use crate::ncname::{is_nc_name_char as is_nc_name_char_fn, is_nc_name_start_char as is_nc_name_start_char_fn};
 use crate::types::*;
 use nom::character::complete::satisfy;
 use nom::combinator::cut;
@@ -9,7 +10,7 @@ use nom::{
     branch::alt,
     bytes::complete::{is_not, tag, take_until},
     character::{
-        complete::{char, multispace1},
+        complete::multispace1,
         streaming::not_line_ending,
     },
     combinator::{all_consuming, map, not, opt, peek, recognize},
@@ -222,38 +223,14 @@ pub fn nc_name(input: Span) -> IResult<Span, NcName> {
 }
 
 fn nc_name_start_char(input: Span) -> IResult<Span, char> {
-    // per https://www.w3.org/TR/REC-xml/#NT-NameStartChar -- but without ':'
-    alt((
-        char_in('A'..='Z'),
-        char('_'),
-        char_in('a'..='z'),
-        char_in('\u{C0}'..='\u{D6}'),
-        char_in('\u{D8}'..='\u{F6}'),
-        char_in('\u{F8}'..='\u{2FF}'),
-        char_in('\u{370}'..='\u{37D}'),
-        char_in('\u{37F}'..='\u{1FFF}'),
-        char_in('\u{200C}'..='\u{200D}'),
-        char_in('\u{2070}'..='\u{218F}'),
-        char_in('\u{2C00}'..='\u{2FEF}'),
-        char_in('\u{3001}'..='\u{D7FF}'),
-        char_in('\u{F900}'..='\u{FDCF}'),
-        char_in('\u{FDF0}'..='\u{FFFD}'),
-        char_in('\u{10000}'..='\u{EFFFF}'),
-    ))
-    .parse(input)
+    // XML 1.0 Second Edition NCNameStartChar = Letter | '_'
+    // (Letter = BaseChar | Ideographic, per XML 1.0 Appendix B)
+    satisfy(is_nc_name_start_char_fn).parse(input)
 }
 
 fn nc_name_char(input: Span) -> IResult<Span, char> {
-    alt((
-        nc_name_start_char,
-        char('-'),
-        char('.'),
-        char_in('0'..='9'),
-        char('\u{B7}'),
-        char_in('\u{0300}'..='\u{036F}'),
-        char_in('\u{203F}'..='\u{2040}'),
-    ))
-    .parse(input)
+    // XML 1.0 Second Edition NCNameChar = Letter | Digit | '.' | '-' | '_' | CombiningChar | Extender
+    satisfy(is_nc_name_char_fn).parse(input)
 }
 
 fn keyword(input: Span) -> IResult<Span, Keyword> {
