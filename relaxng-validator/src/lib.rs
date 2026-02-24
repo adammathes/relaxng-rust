@@ -526,6 +526,9 @@ pub struct Validator<'a> {
     last_was_start_element: bool,
     stack: ElementStack<'a>,
     entity_definitions: HashMap<String, String>,
+    /// Buffer for accumulating text content that may be split by processing
+    /// instructions or CDATA sections. Flushed before non-text events.
+    text_buffer: String,
 }
 
 impl<'a> Validator<'a> {
@@ -551,6 +554,7 @@ impl<'a> Validator<'a> {
             last_was_start_element: false,
             stack: ElementStack::default(),
             entity_definitions,
+            text_buffer: String::new(),
         }
     }
     fn compile(s: &Schema, p: &model::Pattern) -> PatId {
@@ -639,13 +643,34 @@ impl<'a> Validator<'a> {
         self.schema.check_choices(self.current_step, &mut seen);
     }
 
+    /// Flush any buffered text content by applying text_deriv to the current pattern.
+    /// Returns Err if the text is not allowed by the current pattern.
+    fn flush_text_buffer(&mut self) -> Result<(), ()> {
+        if self.text_buffer.is_empty() {
+            return Ok(());
+        }
+        let pat = self.schema.patt(self.current_step);
+        let next_id = Self::text_deriv(pat, &mut self.schema, &self.text_buffer);
+        let next_pat = self.schema.patt(next_id);
+        self.text_buffer.clear();
+        if let Pat::NotAllowed = next_pat {
+            Err(())
+        } else {
+            self.current_step = next_id;
+            self.last_was_start_element = false;
+            Ok(())
+        }
+    }
+
     fn validate(&mut self, evt: Token<'a>) -> Result<(), ValidatorError<'a>> {
         let pat = self.schema.patt(self.current_step);
         let new = match evt {
             Token::EmptyDtd { .. }
             | Token::Comment { .. }
             | Token::ProcessingInstruction { .. } => {
-                // does not change current_step state
+                // does not change current_step state; does not flush text buffer
+                // (PIs may appear within text content, e.g. "x<?pi?>y" should
+                // be treated as the single text string "xy")
                 return Ok(());
             }
             Token::ElementStart {
@@ -653,26 +678,13 @@ impl<'a> Validator<'a> {
                 local,
                 span,
             } => {
+                // Flush any buffered text before processing a new element
+                self.flush_text_buffer()
+                    .map_err(|()| ValidatorError::NotAllowed(evt))?;
                 self.stack.push(prefix, local, span);
                 // does not change current_step state
                 return Ok(());
             }
-            /*
-                let next_pat = Self::start_tag_open_deriv(pat, &mut self.schema, namespace, &name);
-                // TODO: refactor early-returns
-                let next_pat = match self.schema.patt(next_pat) {
-                    Pat::NotAllowed => return Err(ValidatorError::NotAllowed(evt)),
-                    p => Self::attrs_deriv(next_pat, &mut self.schema, attributes)
-                };
-                let next_pat = match self.schema.patt(next_pat) {
-                    Pat::NotAllowed => return Err(ValidatorError::NotAllowed(evt)),
-                    p => Self::start_tag_close_deriv(next_pat, &mut self.schema)
-                };
-                match self.schema.patt(next_pat) {
-                    Pat::NotAllowed => return Err(ValidatorError::NotAllowed(evt)),
-                    p => next_pat //Self::children_deriv(next_pat, &mut self.schema)
-                }
-            */
             Token::Attribute {
                 prefix,
                 local,
@@ -686,12 +698,19 @@ impl<'a> Validator<'a> {
             Token::ElementEnd { end, span: _ } => {
                 match end {
                     ElementEnd::Open => {
-                        Self::close_element_start(&self.stack, &mut self.schema, evt, pat)?
+                        let result =
+                            Self::close_element_start(&self.stack, &mut self.schema, evt, pat)?;
+                        self.last_was_start_element = true;
+                        result
                     }
                     ElementEnd::Close(_, _) => {
+                        // Flush any buffered text before processing end tag
+                        self.flush_text_buffer()
+                            .map_err(|()| ValidatorError::NotAllowed(evt))?;
+                        let pat = self.schema.patt(self.current_step);
                         let next_pat = if self.last_was_start_element {
-                            // The last event was XmlEvent::StartElement with no child elements or child
-                            // text nodes.
+                            // The last event was the opening of an element with no child elements
+                            // or child text nodes.
                             //
                             // Per https://relaxng.org/jclark/derivative.html ,
                             //     "The case where the list of children is empty is
@@ -699,7 +718,7 @@ impl<'a> Validator<'a> {
                             //      were the empty string."
                             //
                             // This fake text node is required for a pattern like 'element foo { token }'
-                            // to match the input '<foo/>' or '<foo></foo>'
+                            // to match the input '<foo></foo>'
                             let p = Self::text_deriv(pat, &mut self.schema, "");
                             self.schema.patt(p)
                         } else {
@@ -711,28 +730,25 @@ impl<'a> Validator<'a> {
                         let next_id =
                             Self::close_element_start(&self.stack, &mut self.schema, evt, pat)?;
                         let pat = self.schema.patt(next_id);
-                        let next_pat = if self.last_was_start_element {
-                            // The last event was XmlEvent::StartElement with no child elements or child
-                            // text nodes.
-                            //
-                            // Per https://relaxng.org/jclark/derivative.html ,
-                            //     "The case where the list of children is empty is
-                            //      treated as if there were a text node whose value
-                            //      were the empty string."
-                            //
-                            // This fake text node is required for a pattern like 'element foo { token }'
-                            // to match the input '<foo/>' or '<foo></foo>'
-                            let p = Self::text_deriv(pat, &mut self.schema, "");
-                            self.schema.patt(p)
-                        } else {
-                            pat
-                        };
+                        // Self-closing elements like <foo/> always have no children.
+                        // Per https://relaxng.org/jclark/derivative.html ,
+                        //     "The case where the list of children is empty is
+                        //      treated as if there were a text node whose value
+                        //      were the empty string."
+                        let p = Self::text_deriv(pat, &mut self.schema, "");
+                        let next_pat = self.schema.patt(p);
                         Self::end_tag_deriv(next_pat, &mut self.schema)
                     }
                 }
             }
-            Token::Cdata { text, span: _ } => Self::text_deriv(pat, &mut self.schema, &text),
+            Token::Cdata { text, span: _ } => {
+                // Buffer CDATA text to be flushed with other text content
+                self.text_buffer.push_str(&text);
+                self.last_was_start_element = false;
+                return Ok(());
+            }
             Token::Text { text } => {
+                // Buffer text content (with entity resolution) for later flushing
                 let mut buffer = String::new();
                 for val in parse_entities(text.start(), text.as_str()) {
                     match val {
@@ -754,12 +770,9 @@ impl<'a> Validator<'a> {
                                     continue;
                                 }
                             };
-                            // we only reach this point for Txt::Text and Txt::Entity cases,
                             if txt.len() == text.len() {
-                                // no need to copy data into the buffer, just process the whole input in one go
                                 break;
                             } else {
-                                // the input contains entities, so we decode these and append to buffer
                                 buffer.push_str(txt);
                             }
                         }
@@ -773,12 +786,9 @@ impl<'a> Validator<'a> {
                 } else {
                     &buffer[..]
                 };
-                let next_id = Self::text_deriv(pat, &mut self.schema, data);
-                let next_pat = self.schema.patt(next_id);
-                if let Pat::NotAllowed = next_pat {
-                    return Err(ValidatorError::NotAllowed(Token::Text { text }));
-                }
-                next_id
+                self.text_buffer.push_str(data);
+                self.last_was_start_element = false;
+                return Ok(());
             }
             Token::EntityDeclaration {
                 name,
@@ -804,9 +814,16 @@ impl<'a> Validator<'a> {
                 return Ok(());
             }
         };
-        if let Token::ElementStart { .. } = evt {
-            self.last_was_start_element = true;
-        } else {
+        // Reset last_was_start_element for events that represent child content.
+        // It's set to true in ElementEnd::Open handler when we finish opening an element.
+        // Text, Cdata, and element close events indicate child content was present.
+        if !matches!(
+            evt,
+            Token::ElementEnd {
+                end: ElementEnd::Open,
+                ..
+            }
+        ) {
             self.last_was_start_element = false;
         }
         if let Pat::NotAllowed = self.schema.patt(new) {
@@ -1568,7 +1585,16 @@ impl<'a> ElementStack<'a> {
         prefix: StrSpan<'a>,
     ) -> Result<Option<StrSpan<'a>>, ValidatorError<'a>> {
         if "" == prefix.as_str() {
-            Ok(None)
+            // Look up the default namespace (xmlns="...")
+            // An empty-string default namespace means "no namespace"
+            match self.lookup_namespace_uri("") {
+                Some(ns) if !ns.as_str().is_empty() => Ok(Some(ns)),
+                _ => Ok(None),
+            }
+        } else if prefix.as_str() == "xml" {
+            // The xml: prefix is always predefined per XML Namespaces spec
+            static XML_NS: &str = "http://www.w3.org/XML/1998/namespace";
+            Ok(Some(StrSpan::from(XML_NS)))
         } else {
             Ok(Some(self.lookup_namespace_uri(&prefix).ok_or(
                 ValidatorError::UndefinedNamespacePrefix { prefix },
@@ -1908,12 +1934,14 @@ mod tests {
 
     #[test]
     fn attribute_any_other_namespace() {
+        // Per section 7.3, attribute with infinite name class (anyName/nsName)
+        // must be inside oneOrMore
         Fixture::correct(
             "namespace local = \"\" \
              default namespace foo = \"urn:foo\" \
              element MPD { \
                 attribute mediaPresentationDuration { xsd:duration }?, \
-                attribute * - (foo:* | local:*)  { text } \
+                attribute * - (foo:* | local:*)  { text }* \
              }",
         )
         .invalid(

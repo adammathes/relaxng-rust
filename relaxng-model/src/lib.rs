@@ -22,6 +22,7 @@ use std::sync::Arc;
 
 pub mod datatype;
 pub mod model;
+pub mod restrictions;
 
 // TODO:
 //  - Detect ambiguous grammars per https://www.kohsuke.org/relaxng/ambiguity/AmbiguousGrammarDetection.pdf
@@ -164,6 +165,30 @@ pub enum RelaxError {
         include_span: codemap::Span,
         name: String,
     },
+    /// Section 7 restriction: a pattern type appears in a context where it is forbidden
+    RestrictedPattern {
+        span: codemap::Span,
+        pattern_name: String,
+        context: String,
+    },
+    /// Section 7.1.1: attribute named "xmlns" is forbidden
+    XmlnsAttributeForbidden,
+    /// Section 7.1.1: attribute in xmlns namespace is forbidden
+    XmlnsNamespaceForbidden,
+    /// Section 7.1.1: anyName in except of anyName is forbidden
+    AnyNameInExcept,
+    /// Section 7.1.1: anyName in except of nsName is forbidden
+    AnyNameInNsNameExcept,
+    /// Section 7.1.1: nsName in except of nsName is forbidden
+    NsNameInNsNameExcept,
+    /// Section 7.3: overlapping attribute name classes in group/interleave
+    OverlappingAttributes {
+        span: codemap::Span,
+    },
+    /// Section 7.4: overlapping element name classes in interleave
+    OverlappingElements {
+        span: codemap::Span,
+    },
 }
 
 enum Context<'a> {
@@ -234,11 +259,12 @@ impl<'a> Context<'a> {
         }
     }
 
-    /// Creates a new context for an included file
-    fn new_include(
+    /// Creates a new context for an included file with a specified default namespace
+    fn new_include_with_ns(
         &self,
         span: codemap::Span,
         file: Arc<codemap::File>,
+        ns: String,
     ) -> Result<Context<'_>, RelaxError> {
         self.check_include(span, file.clone())?;
         let mut namespaces = HashMap::new();
@@ -256,7 +282,7 @@ impl<'a> Context<'a> {
             file,
             overrides: RefCell::new(HashMap::new()),
             namespaces,
-            default_namespace: "".to_string(),
+            default_namespace: ns,
             datatypes,
         })
     }
@@ -712,6 +738,12 @@ impl<FS: Files> Compiler<FS> {
             let mut seen = HashSet::new();
             // TODO: this is a temporary hack to detect bad references; do this in a better way?
             self.check(&mut seen, start.borrow().as_ref().unwrap().pattern())?;
+            // Section 7 restriction checking
+            {
+                let borrowed = start.borrow();
+                let rule = borrowed.as_ref().unwrap();
+                restrictions::check_restrictions(rule, *rule.span())?;
+            }
             Ok(start)
         } else {
             Err(RelaxError::StartRuleNotDefined { span: file.span })
@@ -1172,6 +1204,81 @@ impl<FS: Files> Compiler<FS> {
                     spans: vec![label],
                 }
             }
+            RelaxError::RestrictedPattern {
+                span,
+                pattern_name,
+                context,
+            } => {
+                let label = codemap_diagnostic::SpanLabel {
+                    span: *span,
+                    style: codemap_diagnostic::SpanStyle::Primary,
+                    label: Some(format!("'{pattern_name}' not allowed here")),
+                };
+                codemap_diagnostic::Diagnostic {
+                    level: codemap_diagnostic::Level::Error,
+                    message: format!(
+                        "Pattern '{pattern_name}' is not allowed in '{context}' context (section 7)"
+                    ),
+                    code: None,
+                    spans: vec![label],
+                }
+            }
+            RelaxError::XmlnsAttributeForbidden => codemap_diagnostic::Diagnostic {
+                level: codemap_diagnostic::Level::Error,
+                message: "Attribute named 'xmlns' is forbidden (section 7.1.1)".to_string(),
+                code: None,
+                spans: vec![],
+            },
+            RelaxError::XmlnsNamespaceForbidden => codemap_diagnostic::Diagnostic {
+                level: codemap_diagnostic::Level::Error,
+                message: "Attribute in 'http://www.w3.org/2000/xmlns' namespace is forbidden (section 7.1.1)".to_string(),
+                code: None,
+                spans: vec![],
+            },
+            RelaxError::AnyNameInExcept => codemap_diagnostic::Diagnostic {
+                level: codemap_diagnostic::Level::Error,
+                message: "anyName is not allowed inside except of anyName (section 7.1.1)".to_string(),
+                code: None,
+                spans: vec![],
+            },
+            RelaxError::AnyNameInNsNameExcept => codemap_diagnostic::Diagnostic {
+                level: codemap_diagnostic::Level::Error,
+                message: "anyName is not allowed inside except of nsName (section 7.1.1)".to_string(),
+                code: None,
+                spans: vec![],
+            },
+            RelaxError::NsNameInNsNameExcept => codemap_diagnostic::Diagnostic {
+                level: codemap_diagnostic::Level::Error,
+                message: "nsName is not allowed inside except of nsName (section 7.1.1)".to_string(),
+                code: None,
+                spans: vec![],
+            },
+            RelaxError::OverlappingAttributes { span } => {
+                let label = codemap_diagnostic::SpanLabel {
+                    span: *span,
+                    style: codemap_diagnostic::SpanStyle::Primary,
+                    label: Some("overlapping attribute name classes".to_string()),
+                };
+                codemap_diagnostic::Diagnostic {
+                    level: codemap_diagnostic::Level::Error,
+                    message: "Overlapping attribute name classes in group/interleave (section 7.3)".to_string(),
+                    code: None,
+                    spans: vec![label],
+                }
+            }
+            RelaxError::OverlappingElements { span } => {
+                let label = codemap_diagnostic::SpanLabel {
+                    span: *span,
+                    style: codemap_diagnostic::SpanStyle::Primary,
+                    label: Some("overlapping element name classes".to_string()),
+                };
+                codemap_diagnostic::Diagnostic {
+                    level: codemap_diagnostic::Level::Error,
+                    message: "Overlapping element name classes in interleave (section 7.4)".to_string(),
+                    code: None,
+                    spans: vec![label],
+                }
+            }
             _ => panic!("{err:?}"),
         }
     }
@@ -1312,7 +1419,13 @@ impl<FS: Files> Compiler<FS> {
         // TODO: get the span of the grammar in the file, rather than the span of the whole file
         let include_span = file.span;
 
-        let mut inc_ctx = ctx.new_include(span, file)?;
+        // Propagate the ns attribute from <include> as the default namespace
+        let ns = inc
+            .3
+            .as_ref()
+            .map(|lit| lit.as_string_value())
+            .unwrap_or_default();
+        let mut inc_ctx = ctx.new_include_with_ns(span, file, ns)?;
 
         if let Some(ref inherit) = inc.1 {
             let prefix = inherit.0.to_string();
@@ -1616,7 +1729,14 @@ impl<FS: Files> Compiler<FS> {
             .get_schema(&path)
             .map_err(|e| RelaxError::IncludeError(span, Box::new(e)))?;
         let file_span = file.span;
-        let mut inc_ctx = ctx.new_include(span, file)?;
+        // Propagate the ns attribute from <externalRef> as the default namespace
+        // for the referenced schema
+        let ns = external
+            .2
+            .as_ref()
+            .map(|lit| lit.as_string_value())
+            .unwrap_or_default();
+        let mut inc_ctx = ctx.new_include_with_ns(span, file, ns)?;
 
         match &s.pattern_or_grammar {
             types::PatternOrGrammar::Pattern(pat) => self
@@ -1694,7 +1814,19 @@ impl<FS: Files> Compiler<FS> {
         g: &types::GrammarContent,
     ) -> Result<(), RelaxError> {
         match g {
-            types::GrammarContent::Define(d) => self.compile_define(child_ctx, d),
+            types::GrammarContent::Define(d) => {
+                match self.compile_define(child_ctx, d) {
+                    Ok(()) => Ok(()),
+                    Err(RelaxError::RecursiveReference { .. }) => {
+                        // A define with a direct recursive reference (no element
+                        // boundary) is accepted if it's unreachable from start.
+                        // Skip it silently; the undefined-ref check will catch
+                        // it only if something actually references it.
+                        Ok(())
+                    }
+                    Err(e) => Err(e),
+                }
+            }
             types::GrammarContent::Div(d) => self.compile_grammar_div(child_ctx, d),
             types::GrammarContent::Include(i) => self.compile_include(child_ctx, i),
             types::GrammarContent::Annotation(_) => Ok(()),
@@ -1894,10 +2026,22 @@ impl<FS: Files> Compiler<FS> {
                 Name::NamespacedName(NamespacedName {
                     namespace_uri,
                     localname,
-                }) => Ok(model::NameClass::named(
-                    namespace_uri.as_string_value(),
-                    localname.1.clone(),
-                )),
+                }) => {
+                    let ns = namespace_uri.as_string_value();
+                    // If the namespace is empty and we're in an element context,
+                    // use the context's default namespace (from externalRef/include ns attribute)
+                    let ns = if ns.is_empty() && elem_attr == ElemAttr::Element {
+                        let default = ctx.default_namespace_uri();
+                        if !default.is_empty() {
+                            default.to_string()
+                        } else {
+                            ns
+                        }
+                    } else {
+                        ns
+                    };
+                    Ok(model::NameClass::named(ns, localname.1.clone()))
+                }
             },
             types::NameClass::NsName(types::NsName { name, except }) => {
                 let except = if let Some(except) = except {
