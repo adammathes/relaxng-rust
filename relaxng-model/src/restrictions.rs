@@ -305,6 +305,8 @@ fn check_pattern(
             // 7.4: check for overlapping elements and duplicate text across
             // interleave branches
             check_interleave_restrictions(members, span)?;
+            // 7.3: check for overlapping attribute name classes in interleave
+            check_group_attribute_overlap(members, span)?;
 
             // 7.1.2: entering interleave while inside oneOrMore activates the
             // oneOrMore//interleave//attribute restriction -- only if the
@@ -330,6 +332,15 @@ fn check_pattern(
             // 7.1.4: interleave inside data/except is forbidden
             if ctx.in_data_except {
                 return Err(restricted(span, "interleave", "data/except"));
+            }
+            // 7.4: mixed = interleave(text, content). If content also has text
+            // (e.g., content is mixed(...)), that's text in both interleave branches.
+            if has_text(content) {
+                return Err(restricted(
+                    span,
+                    "text",
+                    "interleave (both branches via nested mixed)",
+                ));
             }
             let mut child_ctx = ctx.clone();
             if ctx.in_one_or_more {
@@ -635,14 +646,23 @@ fn collect_attribute_name_classes(pattern: &Pattern, out: &mut Vec<CollectedName
 /// interleave branch -- recurse through group/interleave/choice but
 /// don't enter element content).
 fn collect_element_name_classes(pattern: &Pattern, out: &mut Vec<CollectedNameClass>) {
-    if is_dead(pattern) {
-        return;
-    }
     match pattern {
         Pattern::Element(nc, _) => {
+            // Always collect element name classes, even if content is notAllowed.
+            // Section 7.4 checks structural name class overlap, not semantic reachability.
             collect_name_class_entries(nc, out);
         }
-        Pattern::Group(members) | Pattern::Interleave(members) | Pattern::Choice(members) => {
+        Pattern::NotAllowed => {}
+        Pattern::Group(members) | Pattern::Interleave(members) => {
+            // group/interleave containing NotAllowed simplifies to NotAllowed
+            if members.iter().any(|m| matches!(m, Pattern::NotAllowed)) {
+                return;
+            }
+            for m in members {
+                collect_element_name_classes(m, out);
+            }
+        }
+        Pattern::Choice(members) => {
             for m in members {
                 collect_element_name_classes(m, out);
             }
@@ -889,6 +909,27 @@ fn is_name_excluded_by(namespace_uri: &str, name: &str, excludes: &[CollectedNam
         }
     }
     false
+}
+
+// --- 7.3: Infinite name class helpers ---
+
+/// Check if a name class can match infinitely many names (anyName or nsName).
+fn name_class_is_infinite(nc: &NameClass) -> bool {
+    match nc {
+        NameClass::AnyName { .. } => true,
+        NameClass::NsName { .. } => true,
+        NameClass::Alt { a, b } => name_class_is_infinite(a) || name_class_is_infinite(b),
+        NameClass::Named { .. } => false,
+    }
+}
+
+/// Check if a pattern is effectively empty (matches only the empty string
+/// or nothing at all).
+fn content_is_empty(pattern: &Pattern) -> bool {
+    match pattern {
+        Pattern::Empty | Pattern::NotAllowed => true,
+        _ => false,
+    }
 }
 
 // --- Helper to construct a restriction error ---
