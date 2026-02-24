@@ -1,4 +1,4 @@
-use relaxng_model::datatype::Datatype;
+use relaxng_model::datatype::{Datatype, Namespaces};
 use relaxng_model::model::NameClass;
 use relaxng_model::{datatype, model};
 use std::cell::RefCell;
@@ -650,7 +650,7 @@ impl<'a> Validator<'a> {
             return Ok(());
         }
         let pat = self.schema.patt(self.current_step);
-        let next_id = Self::text_deriv(pat, &mut self.schema, &self.text_buffer);
+        let next_id = Self::text_deriv(pat, &mut self.schema, &self.text_buffer, &self.stack);
         let next_pat = self.schema.patt(next_id);
         self.text_buffer.clear();
         if let Pat::NotAllowed = next_pat {
@@ -719,7 +719,7 @@ impl<'a> Validator<'a> {
                             //
                             // This fake text node is required for a pattern like 'element foo { token }'
                             // to match the input '<foo></foo>'
-                            let p = Self::text_deriv(pat, &mut self.schema, "");
+                            let p = Self::text_deriv(pat, &mut self.schema, "", &self.stack);
                             self.schema.patt(p)
                         } else {
                             pat
@@ -735,7 +735,7 @@ impl<'a> Validator<'a> {
                         //     "The case where the list of children is empty is
                         //      treated as if there were a text node whose value
                         //      were the empty string."
-                        let p = Self::text_deriv(pat, &mut self.schema, "");
+                        let p = Self::text_deriv(pat, &mut self.schema, "", &self.stack);
                         let next_pat = self.schema.patt(p);
                         Self::end_tag_deriv(next_pat, &mut self.schema)
                     }
@@ -856,7 +856,7 @@ impl<'a> Validator<'a> {
                 let mut pat = next_pat;
                 for att in attributes {
                     let mut memo = HashMap::new();
-                    pat = Self::att_deriv(&mut memo, pat, schema, att);
+                    pat = Self::att_deriv(&mut memo, pat, schema, att, stack);
                     if let Pat::NotAllowed = schema.patt(pat) {
                         return Err(ValidatorError::NotAllowed(Token::Attribute {
                             prefix: att.name.namespace_uri.unwrap_or_else(|| StrSpan::from("")),
@@ -879,24 +879,24 @@ impl<'a> Validator<'a> {
         })
     }
 
-    fn text_deriv(current: Pat, schema: &mut Schema, text: &str) -> PatId {
+    fn text_deriv(current: Pat, schema: &mut Schema, text: &str, ns: &dyn Namespaces) -> PatId {
         // TODO: do we need to memoize here per att_deriv() ?
         match current {
             Pat::Choice(p1, p2, _) => {
                 let p1 = schema.patt(p1);
                 let p2 = schema.patt(p2);
-                let a = Self::text_deriv(p1, schema, text);
-                let b = Self::text_deriv(p2, schema, text);
+                let a = Self::text_deriv(p1, schema, text, ns);
+                let b = Self::text_deriv(p2, schema, text, ns);
                 schema.choice(a, b)
             }
             Pat::Interleave(p1, p2, _) => {
                 let pat1 = schema.patt(p1);
                 let pat2 = schema.patt(p2);
 
-                let d1 = Self::text_deriv(pat1, schema, text);
+                let d1 = Self::text_deriv(pat1, schema, text, ns);
                 let a = schema.interleave(d1, p2);
 
-                let d2 = Self::text_deriv(pat2, schema, text);
+                let d2 = Self::text_deriv(pat2, schema, text, ns);
                 let b = schema.interleave(p1, d2);
                 schema.choice(a, b)
             }
@@ -904,10 +904,10 @@ impl<'a> Validator<'a> {
                 let pat1 = schema.patt(p1);
                 let nullable = pat1.is_nullable();
                 let pat2 = schema.patt(p2);
-                let d1 = Self::text_deriv(pat1, schema, text);
+                let d1 = Self::text_deriv(pat1, schema, text, ns);
                 let p = schema.group(d1, p2);
                 if nullable {
-                    let d2 = Self::text_deriv(pat2, schema, text);
+                    let d2 = Self::text_deriv(pat2, schema, text, ns);
                     schema.choice(p, d2)
                 } else {
                     p
@@ -915,12 +915,12 @@ impl<'a> Validator<'a> {
             }
             Pat::After(p1, p2) => {
                 let pat1 = schema.patt(p1);
-                let d = Self::text_deriv(pat1, schema, text);
+                let d = Self::text_deriv(pat1, schema, text, ns);
                 schema.after(d, p2)
             }
             Pat::OneOrMore(p, _) => {
                 let pat = schema.patt(p);
-                let d = Self::text_deriv(pat, schema, text);
+                let d = Self::text_deriv(pat, schema, text, ns);
                 schema.group(d, schema.choice(schema.one_or_more(p), schema.empty()))
             }
             Pat::Text => schema.text(),
@@ -932,7 +932,7 @@ impl<'a> Validator<'a> {
                 }
             }
             Pat::DatatypeValue(dt) => {
-                if dt.is_valid(text) {
+                if dt.is_valid_with_ns(text, ns) {
                     schema.empty()
                 } else {
                     schema.not_allowed()
@@ -940,7 +940,7 @@ impl<'a> Validator<'a> {
             }
             Pat::DatatypeExcept(dt, except) => {
                 let pat = schema.patt(except);
-                let d = Self::text_deriv(pat, schema, text);
+                let d = Self::text_deriv(pat, schema, text, ns);
                 let pat2 = schema.patt(d);
                 if dt.is_valid(text) && !pat2.is_nullable() {
                     schema.empty()
@@ -952,7 +952,7 @@ impl<'a> Validator<'a> {
                 let mut p = p;
                 for item in text.split_whitespace() {
                     let pat = schema.patt(p);
-                    p = Self::text_deriv(pat, schema, item);
+                    p = Self::text_deriv(pat, schema, item, ns);
                     if let Pat::NotAllowed = schema.patt(p) {
                         return p;
                     }
@@ -1103,6 +1103,7 @@ impl<'a> Validator<'a> {
         pat: PatId,
         schema: &mut Schema,
         att: Attr,
+        ns: &dyn Namespaces,
     ) -> PatId {
         if let Some(result) = memo.get(&pat) {
             return *result;
@@ -1112,36 +1113,36 @@ impl<'a> Validator<'a> {
         //schema.dumpy(pat, &mut o).unwrap();
         let v = match schema.patt(pat) {
             Pat::After(p1, p2) => {
-                let d = Self::att_deriv(memo, p1, schema, att);
+                let d = Self::att_deriv(memo, p1, schema, att, ns);
                 schema.after(d, p2)
             }
             Pat::Choice(p1, p2, _) => {
-                let c1 = Self::att_deriv(memo, p1, schema, att);
-                let c2 = Self::att_deriv(memo, p2, schema, att);
+                let c1 = Self::att_deriv(memo, p1, schema, att, ns);
+                let c2 = Self::att_deriv(memo, p2, schema, att, ns);
                 schema.choice(c1, c2)
             }
             Pat::Group(p1, p2, _) => {
-                let d1 = Self::att_deriv(memo, p1, schema, att);
+                let d1 = Self::att_deriv(memo, p1, schema, att, ns);
                 let s1 = schema.group(d1, p2);
-                let d2 = Self::att_deriv(memo, p2, schema, att);
+                let d2 = Self::att_deriv(memo, p2, schema, att, ns);
                 let s2 = schema.group(p1, d2);
                 schema.choice(s1, s2)
             }
             Pat::Interleave(p1, p2, _) => {
-                let d1 = Self::att_deriv(memo, p1, schema, att);
+                let d1 = Self::att_deriv(memo, p1, schema, att, ns);
                 let i1 = schema.interleave(d1, p2);
-                let d2 = Self::att_deriv(memo, p2, schema, att);
+                let d2 = Self::att_deriv(memo, p2, schema, att, ns);
                 let i2 = schema.interleave(p1, d2);
                 schema.choice(i1, i2)
             }
             Pat::OneOrMore(p, _) => {
-                let s1 = Self::att_deriv(memo, p, schema, att);
+                let s1 = Self::att_deriv(memo, p, schema, att, ns);
                 let s2 = schema.choice(pat, schema.empty());
                 schema.group(s1, s2)
             }
             Pat::Attribute(ref nc, p) => {
                 let att_pat = schema.patt(p);
-                if contains(nc, att.name) && Self::value_match(att_pat, schema, &att.value) {
+                if contains(nc, att.name) && Self::value_match(att_pat, schema, &att.value, ns) {
                     schema.empty()
                 } else {
                     schema.not_allowed()
@@ -1153,11 +1154,11 @@ impl<'a> Validator<'a> {
         v
     }
 
-    fn value_match(pat: Pat, schema: &mut Schema, val: &str) -> bool {
+    fn value_match(pat: Pat, schema: &mut Schema, val: &str, ns: &dyn Namespaces) -> bool {
         if pat.is_nullable() && is_whitespace_str(val) {
             true
         } else {
-            let d = Self::text_deriv(pat, schema, val);
+            let d = Self::text_deriv(pat, schema, val, ns);
             schema.patt(d).is_nullable()
         }
     }
@@ -1670,6 +1671,12 @@ impl<'a> ElementStack<'a> {
                 })
             })
             .collect()
+    }
+}
+
+impl<'a> Namespaces for ElementStack<'a> {
+    fn resolve(&self, prefix: &str) -> Option<&str> {
+        self.lookup_namespace_uri(prefix).map(|s| s.as_str())
     }
 }
 

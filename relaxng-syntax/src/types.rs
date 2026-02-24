@@ -101,6 +101,9 @@ pub struct DatatypeValuePattern(
     // The default datatype if the schema doesn't specify one explicitly is "token"
     pub Option<DatatypeName>,
     pub Literal,
+    /// In-scope namespace bindings (prefix, uri) for QName value resolution.
+    /// Uses "" as prefix for the default namespace.
+    pub Vec<(String, String)>,
 );
 
 #[derive(Debug, PartialEq)]

@@ -1920,7 +1920,7 @@ impl<FS: Files> Compiler<FS> {
         };
         let datatype = self
             .datatype_compiler
-            .datatype_value(ctx, &name, &datatype_value.1.as_string_value())
+            .datatype_value(ctx, &name, &datatype_value.1.as_string_value(), &datatype_value.2)
             .map_err(RelaxError::DatatypeError)?;
         Ok(Pattern::DatatypeValue { datatype })
     }
