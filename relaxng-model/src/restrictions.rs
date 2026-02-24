@@ -194,6 +194,14 @@ fn check_pattern(
 
     match pattern {
         Pattern::Element(name_class, content) => {
+            // 7.1.3: element inside list is forbidden (list can only contain data patterns)
+            if ctx.in_list {
+                return Err(restricted(span, "element", "list"));
+            }
+            // 7.1.4: element inside data/except is forbidden
+            if ctx.in_data_except {
+                return Err(restricted(span, "element", "data/except"));
+            }
             // Check name class restrictions
             check_name_class(name_class)?;
             // Element creates a new context boundary -- reset all flags
@@ -267,6 +275,9 @@ fn check_pattern(
             if ctx.in_data_except {
                 return Err(restricted(span, "group", "data/except"));
             }
+            // 7.3: check for overlapping attribute name classes within the group
+            check_group_attribute_overlap(members, span)?;
+
             // 7.1.2: entering group while inside oneOrMore activates the
             // oneOrMore//group//attribute restriction -- BUT only if the group
             // has more than one non-empty member (otherwise it simplifies away)
@@ -291,6 +302,10 @@ fn check_pattern(
             if ctx.in_data_except {
                 return Err(restricted(span, "interleave", "data/except"));
             }
+            // 7.4: check for overlapping elements and duplicate text across
+            // interleave branches
+            check_interleave_restrictions(members, span)?;
+
             // 7.1.2: entering interleave while inside oneOrMore activates the
             // oneOrMore//interleave//attribute restriction -- only if the
             // interleave has more than one non-empty member
@@ -497,6 +512,383 @@ fn check_nsname_except(except: &NameClass) -> Result<(), RelaxError> {
         }
         NameClass::Named { .. } => Ok(()),
     }
+}
+
+// --- 7.3: Overlapping attribute name classes in group ---
+//
+// In a group (or implicit group within an element's content), attribute name
+// classes must not overlap between siblings. This prevents duplicate attributes.
+
+fn check_group_attribute_overlap(
+    members: &[Pattern],
+    span: codemap::Span,
+) -> Result<(), RelaxError> {
+    let mut all_attr_names: Vec<CollectedNameClass> = Vec::new();
+    for member in members {
+        if is_dead(member) {
+            continue;
+        }
+        let mut member_attrs = Vec::new();
+        collect_attribute_name_classes(member, &mut member_attrs);
+        for new_nc in &member_attrs {
+            for existing_nc in &all_attr_names {
+                if name_classes_overlap(existing_nc, new_nc) {
+                    return Err(RelaxError::OverlappingAttributes { span });
+                }
+            }
+        }
+        all_attr_names.extend(member_attrs);
+    }
+    Ok(())
+}
+
+// --- 7.4: Interleave restrictions ---
+//
+// For interleave(p1, p2):
+// - Element name classes from p1 and p2 must not overlap
+// - Text must not appear in both p1 and p2
+
+fn check_interleave_restrictions(
+    members: &[Pattern],
+    span: codemap::Span,
+) -> Result<(), RelaxError> {
+    // Collect element name classes and text presence from each branch
+    let mut all_elem_names: Vec<CollectedNameClass> = Vec::new();
+    let mut text_seen = false;
+
+    for member in members {
+        if is_dead(member) {
+            continue;
+        }
+        // Check text overlap
+        if has_text(member) {
+            if text_seen {
+                return Err(restricted(span, "text", "interleave (both branches)"));
+            }
+            text_seen = true;
+        }
+        // Check element name class overlap
+        let mut member_elems = Vec::new();
+        collect_element_name_classes(member, &mut member_elems);
+        for new_nc in &member_elems {
+            for existing_nc in &all_elem_names {
+                if name_classes_overlap(existing_nc, new_nc) {
+                    return Err(RelaxError::OverlappingElements { span });
+                }
+            }
+        }
+        all_elem_names.extend(member_elems);
+    }
+    Ok(())
+}
+
+// --- Name class collection and overlap detection ---
+
+/// A simplified representation of a name class for overlap checking.
+#[derive(Clone, Debug)]
+enum CollectedNameClass {
+    /// A specific name
+    Named { namespace_uri: String, name: String },
+    /// All names in a namespace, optionally with exceptions
+    NsName {
+        namespace_uri: String,
+        except: Vec<CollectedNameClass>,
+    },
+    /// All names, optionally with exceptions
+    AnyName { except: Vec<CollectedNameClass> },
+}
+
+/// Collect attribute name classes from a pattern tree (non-recursive into
+/// element/attribute content -- only top-level attributes).
+fn collect_attribute_name_classes(pattern: &Pattern, out: &mut Vec<CollectedNameClass>) {
+    if is_dead(pattern) {
+        return;
+    }
+    match pattern {
+        Pattern::Attribute(nc, _) => {
+            collect_name_class_entries(nc, out);
+        }
+        Pattern::Group(members) | Pattern::Interleave(members) | Pattern::Choice(members) => {
+            for m in members {
+                collect_attribute_name_classes(m, out);
+            }
+        }
+        Pattern::OneOrMore(p)
+        | Pattern::ZeroOrMore(p)
+        | Pattern::Optional(p)
+        | Pattern::Mixed(p) => {
+            collect_attribute_name_classes(p, out);
+        }
+        Pattern::Ref(_, _, pat_ref) => {
+            if let Some(rule) = pat_ref.0.borrow().as_ref() {
+                collect_attribute_name_classes(rule.pattern(), out);
+            }
+        }
+        // Element creates a boundary -- don't look inside
+        Pattern::Element(_, _) => {}
+        // Leaf patterns have no attributes
+        _ => {}
+    }
+}
+
+/// Collect element name classes from a pattern tree (within a single
+/// interleave branch -- recurse through group/interleave/choice but
+/// don't enter element content).
+fn collect_element_name_classes(pattern: &Pattern, out: &mut Vec<CollectedNameClass>) {
+    if is_dead(pattern) {
+        return;
+    }
+    match pattern {
+        Pattern::Element(nc, _) => {
+            collect_name_class_entries(nc, out);
+        }
+        Pattern::Group(members) | Pattern::Interleave(members) | Pattern::Choice(members) => {
+            for m in members {
+                collect_element_name_classes(m, out);
+            }
+        }
+        Pattern::OneOrMore(p)
+        | Pattern::ZeroOrMore(p)
+        | Pattern::Optional(p)
+        | Pattern::Mixed(p) => {
+            collect_element_name_classes(p, out);
+        }
+        Pattern::Ref(_, _, pat_ref) => {
+            if let Some(rule) = pat_ref.0.borrow().as_ref() {
+                collect_element_name_classes(rule.pattern(), out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Check if a pattern contains `text` (directly or transitively, but not
+/// inside element content).
+fn has_text(pattern: &Pattern) -> bool {
+    if is_dead(pattern) {
+        return false;
+    }
+    match pattern {
+        Pattern::Text => true,
+        Pattern::Mixed(_) => true, // mixed = interleave(text, ...)
+        Pattern::Group(members) | Pattern::Interleave(members) | Pattern::Choice(members) => {
+            members.iter().any(|m| has_text(m))
+        }
+        Pattern::OneOrMore(p) | Pattern::ZeroOrMore(p) | Pattern::Optional(p) => has_text(p),
+        Pattern::Ref(_, _, pat_ref) => {
+            if let Some(rule) = pat_ref.0.borrow().as_ref() {
+                has_text(rule.pattern())
+            } else {
+                false
+            }
+        }
+        // Element creates a boundary -- text inside element doesn't count
+        Pattern::Element(_, _) => false,
+        _ => false,
+    }
+}
+
+/// Expand a NameClass into one or more CollectedNameClass entries.
+/// Alt is expanded into separate entries so each can be checked independently.
+fn collect_name_class_entries(nc: &NameClass, out: &mut Vec<CollectedNameClass>) {
+    match nc {
+        NameClass::Alt { a, b } => {
+            collect_name_class_entries(a, out);
+            collect_name_class_entries(b, out);
+        }
+        _ => out.push(convert_name_class(nc)),
+    }
+}
+
+fn convert_name_class(nc: &NameClass) -> CollectedNameClass {
+    match nc {
+        NameClass::Named {
+            namespace_uri,
+            name,
+        } => CollectedNameClass::Named {
+            namespace_uri: namespace_uri.clone(),
+            name: name.clone(),
+        },
+        NameClass::NsName {
+            namespace_uri,
+            except,
+        } => CollectedNameClass::NsName {
+            namespace_uri: namespace_uri.clone(),
+            // Expand Alt in except clause to preserve all alternatives
+            except: except
+                .iter()
+                .flat_map(|e| {
+                    let mut entries = Vec::new();
+                    collect_name_class_entries(e, &mut entries);
+                    entries
+                })
+                .collect(),
+        },
+        NameClass::AnyName { except } => CollectedNameClass::AnyName {
+            // Expand Alt in except clause to preserve all alternatives
+            except: except
+                .iter()
+                .flat_map(|e| {
+                    let mut entries = Vec::new();
+                    collect_name_class_entries(e, &mut entries);
+                    entries
+                })
+                .collect(),
+        },
+        NameClass::Alt { .. } => {
+            // Alt at top level should be handled by collect_name_class_entries.
+            // If we get here (e.g., inside an except clause), pick the most
+            // restrictive alternative for conservative overlap checking.
+            let mut entries = Vec::new();
+            collect_name_class_entries(nc, &mut entries);
+            // Return the most general one for conservative checking
+            entries
+                .into_iter()
+                .max_by_key(|e| match e {
+                    CollectedNameClass::AnyName { .. } => 2,
+                    CollectedNameClass::NsName { .. } => 1,
+                    CollectedNameClass::Named { .. } => 0,
+                })
+                .unwrap_or(CollectedNameClass::Named {
+                    namespace_uri: String::new(),
+                    name: String::new(),
+                })
+        }
+    }
+}
+
+/// Check if two collected name classes could match the same name.
+fn name_classes_overlap(a: &CollectedNameClass, b: &CollectedNameClass) -> bool {
+    match (a, b) {
+        (
+            CollectedNameClass::Named {
+                namespace_uri: ns1,
+                name: n1,
+            },
+            CollectedNameClass::Named {
+                namespace_uri: ns2,
+                name: n2,
+            },
+        ) => ns1 == ns2 && n1 == n2,
+
+        (
+            CollectedNameClass::Named {
+                namespace_uri,
+                name,
+            },
+            CollectedNameClass::NsName {
+                namespace_uri: ns,
+                except,
+            },
+        )
+        | (
+            CollectedNameClass::NsName {
+                namespace_uri: ns,
+                except,
+            },
+            CollectedNameClass::Named {
+                namespace_uri,
+                name,
+            },
+        ) => {
+            if namespace_uri != ns {
+                return false;
+            }
+            // Named is in the namespace -- check it's not excluded
+            !except.iter().any(|e| match e {
+                CollectedNameClass::Named {
+                    namespace_uri: ens,
+                    name: en,
+                } => ens == namespace_uri && en == name,
+                _ => false,
+            })
+        }
+
+        (
+            CollectedNameClass::Named {
+                namespace_uri,
+                name,
+            },
+            CollectedNameClass::AnyName { except },
+        )
+        | (
+            CollectedNameClass::AnyName { except },
+            CollectedNameClass::Named {
+                namespace_uri,
+                name,
+            },
+        ) => {
+            // AnyName matches everything unless excluded
+            !is_name_excluded_by(namespace_uri, name, except)
+        }
+
+        (
+            CollectedNameClass::NsName {
+                namespace_uri: ns1, ..
+            },
+            CollectedNameClass::NsName {
+                namespace_uri: ns2, ..
+            },
+        ) => {
+            // Two nsName patterns in the same namespace always overlap
+            // (unless their excepts cover each other, which is complex to check)
+            ns1 == ns2
+        }
+
+        (CollectedNameClass::AnyName { .. }, CollectedNameClass::NsName { .. })
+        | (CollectedNameClass::NsName { .. }, CollectedNameClass::AnyName { .. }) => {
+            // anyName always overlaps with nsName (there's always at least one
+            // name in the namespace that anyName matches)
+            true
+        }
+
+        (CollectedNameClass::AnyName { .. }, CollectedNameClass::AnyName { .. }) => {
+            // Two anyName patterns always overlap
+            true
+        }
+    }
+}
+
+fn is_name_excluded_by(namespace_uri: &str, name: &str, excludes: &[CollectedNameClass]) -> bool {
+    for exc in excludes {
+        match exc {
+            CollectedNameClass::Named {
+                namespace_uri: ens,
+                name: en,
+            } => {
+                if ens == namespace_uri && en == name {
+                    return true;
+                }
+            }
+            CollectedNameClass::NsName {
+                namespace_uri: ns,
+                except,
+            } => {
+                if ns == namespace_uri {
+                    // The nsName excludes this namespace, unless the name is
+                    // in the nsName's except list
+                    let re_included = except.iter().any(|e| match e {
+                        CollectedNameClass::Named {
+                            namespace_uri: rns,
+                            name: rn,
+                        } => rns == namespace_uri && rn == name,
+                        _ => false,
+                    });
+                    if !re_included {
+                        return true;
+                    }
+                }
+            }
+            CollectedNameClass::AnyName { except } => {
+                // AnyName excludes everything except what's in its except
+                let re_included = is_name_excluded_by(namespace_uri, name, except);
+                if !re_included {
+                    return true;
+                }
+            }
+        }
+    }
+    false
 }
 
 // --- Helper to construct a restriction error ---
