@@ -1,4 +1,5 @@
 pub mod compact;
+pub mod ncname;
 pub mod types;
 pub mod xml;
 
