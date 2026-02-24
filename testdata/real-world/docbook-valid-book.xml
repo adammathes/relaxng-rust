@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<book xmlns="http://docbook.org/ns/docbook"
+      xmlns:xlink="http://www.w3.org/1999/xlink"
+      version="5.0"
+      xml:id="book-1"
+      xml:lang="en">
+  <info>
+    <title>The Complete Guide</title>
+    <subtitle>A Comprehensive Reference</subtitle>
+    <author>
+      <personname>
+        <firstname>John</firstname>
+        <surname>Doe</surname>
+      </personname>
+    </author>
+    <pubdate>2024</pubdate>
+    <copyright>
+      <year>2024</year>
+      <holder>Publisher Inc.</holder>
+    </copyright>
+  </info>
+
+  <chapter xml:id="ch1">
+    <title>Getting Started</title>
+    <para>Welcome to this guide. This chapter covers the basics.</para>
+    <section>
+      <title>Installation</title>
+      <para>To install, run:</para>
+      <programlisting>apt install my-package</programlisting>
+      <warning>
+        <para>Always backup your data before installation.</para>
+      </warning>
+    </section>
+    <section>
+      <title>Configuration</title>
+      <para>Edit the configuration file <filename>/etc/my-package/config.xml</filename>.</para>
+      <tip>
+        <para>Use <option>--verbose</option> flag for detailed output.</para>
+      </tip>
+    </section>
+  </chapter>
+
+  <chapter xml:id="ch2">
+    <title>Advanced Topics</title>
+    <para>This chapter covers advanced features.</para>
+    <section>
+      <title>API Reference</title>
+      <para>The main API entry point is <methodname>process()</methodname>
+      in the <classname>Processor</classname> class.</para>
+
+      <table>
+        <title>API Methods</title>
+        <tgroup cols="3">
+          <thead>
+            <row>
+              <entry><para>Method</para></entry>
+              <entry><para>Parameters</para></entry>
+              <entry><para>Returns</para></entry>
+            </row>
+          </thead>
+          <tbody>
+            <row>
+              <entry><para><methodname>process()</methodname></para></entry>
+              <entry><para><parameter>input</parameter></para></entry>
+              <entry><para><type>Result</type></para></entry>
+            </row>
+            <row>
+              <entry><para><methodname>validate()</methodname></para></entry>
+              <entry><para><parameter>schema</parameter></para></entry>
+              <entry><para><type>bool</type></para></entry>
+            </row>
+          </tbody>
+        </tgroup>
+      </table>
+    </section>
+  </chapter>
+
+  <appendix xml:id="app-a">
+    <title>Appendix A: Examples</title>
+    <para>Additional examples are provided here.</para>
+    <example>
+      <title>Basic Usage</title>
+      <programlisting language="rust">
+fn main() {
+    println!("Hello, world!");
+}
+      </programlisting>
+    </example>
+  </appendix>
+</book>

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom"
+      xmlns:xhtml="http://www.w3.org/1999/xhtml">
+  <title type="xhtml">
+    <xhtml:div><xhtml:b>Bold Title</xhtml:b></xhtml:div>
+  </title>
+  <id>http://example.com/xhtml-feed</id>
+  <updated>2024-01-15T10:00:00Z</updated>
+  <entry>
+    <title>Entry 1</title>
+    <id>http://example.com/entry/1</id>
+    <updated>2024-01-15T09:00:00Z</updated>
+    <content type="xhtml">
+      <xhtml:div>
+        <xhtml:p>This is <xhtml:em>mixed</xhtml:em> content.</xhtml:p>
+      </xhtml:div>
+    </content>
+    <author><name>Test</name></author>
+  </entry>
+</feed>

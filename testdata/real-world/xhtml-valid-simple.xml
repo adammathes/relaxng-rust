@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <title>Simple XHTML Page</title>
+  </head>
+  <body>
+    <h1>Hello World</h1>
+    <p>This is a simple paragraph with <em>emphasized</em> and <strong>strong</strong> text.</p>
+    <ul>
+      <li>Item one</li>
+      <li>Item two with <a href="http://example.com">a link</a></li>
+    </ul>
+    <p>Another paragraph with an <img src="logo.png" alt="Logo"/> image.</p>
+  </body>
+</html>

@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<article xmlns="http://docbook.org/ns/docbook"
+         xmlns:xlink="http://www.w3.org/1999/xlink"
+         version="5.0"
+         xml:id="article-1"
+         xml:lang="en">
+  <info>
+    <title>Understanding RELAX NG</title>
+    <author>
+      <personname>
+        <firstname>Jane</firstname>
+        <surname>Smith</surname>
+      </personname>
+      <affiliation>
+        <orgname>Example Corp</orgname>
+        <jobtitle>Senior Engineer</jobtitle>
+      </affiliation>
+      <email>jane@example.com</email>
+    </author>
+    <pubdate>2024-01-15</pubdate>
+    <copyright>
+      <year>2024</year>
+      <holder>Example Corp</holder>
+    </copyright>
+    <abstract>
+      <para>This article explains the basics of RELAX NG schema validation.</para>
+    </abstract>
+    <keywordset>
+      <keyword>RELAX NG</keyword>
+      <keyword>XML</keyword>
+      <keyword>validation</keyword>
+    </keywordset>
+  </info>
+
+  <section xml:id="intro">
+    <title>Introduction</title>
+    <para>RELAX NG is a schema language for XML. It is simpler than XML Schema
+    (XSD) and more expressive than DTDs.</para>
+    <para>Key features include:</para>
+    <itemizedlist>
+      <listitem><para>Clean syntax in both XML and compact notation</para></listitem>
+      <listitem><para>Datatype support via external libraries</para></listitem>
+      <listitem><para>Namespace awareness</para></listitem>
+    </itemizedlist>
+  </section>
+
+  <section xml:id="usage">
+    <title>Usage</title>
+    <para>To validate an XML file against a schema, use the <command>jing</command>
+    tool or a compatible validator.</para>
+
+    <programlisting language="bash">jing schema.rng document.xml</programlisting>
+
+    <note>
+      <para>Exit code 0 means valid, exit code 1 means invalid.</para>
+    </note>
+
+    <section xml:id="datatypes">
+      <title>Datatypes</title>
+      <para>RELAX NG supports external datatype libraries. The most common is
+      <literal>http://www.w3.org/2001/XMLSchema-datatypes</literal>.</para>
+      <variablelist>
+        <varlistentry>
+          <term><code>xsd:integer</code></term>
+          <listitem><para>Arbitrary-precision integer values.</para></listitem>
+        </varlistentry>
+        <varlistentry>
+          <term><code>xsd:dateTime</code></term>
+          <listitem><para>ISO 8601 date/time strings.</para></listitem>
+        </varlistentry>
+        <varlistentry>
+          <term><code>xsd:anyURI</code></term>
+          <listitem><para>Absolute or relative URI references.</para></listitem>
+        </varlistentry>
+      </variablelist>
+    </section>
+  </section>
+
+  <section xml:id="conclusion">
+    <title>Conclusion</title>
+    <para>RELAX NG is an excellent choice for XML schema definition. Its
+    simplicity and power make it suitable for a wide range of applications.</para>
+    <blockquote>
+      <attribution>James Clark</attribution>
+      <para>The fundamental insight of RELAX NG is that validation is a
+      derivative operation.</para>
+    </blockquote>
+  </section>
+</article>

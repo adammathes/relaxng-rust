@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Feed Without ID</title>
+  <updated>2024-01-15T10:00:00Z</updated>
+  <author><name>Test</name></author>
+  <!-- Missing required <id> element - should be INVALID -->
+</feed>

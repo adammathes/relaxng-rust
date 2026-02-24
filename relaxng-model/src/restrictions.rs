@@ -972,9 +972,15 @@ enum ContentType {
 }
 
 /// Compute the content type of a pattern (for section 7.2 checking).
-/// Per spec: text=complex, element=complex, ref=complex,
-/// data/value/list=simple, empty/attribute=empty, notAllowed=empty.
+/// Per spec: text=complex, element=complex, data/value/list=simple,
+/// empty/attribute=empty, notAllowed=empty.
+/// Refs are followed to their resolved content type (with cycle detection).
 fn content_type(pattern: &Pattern) -> ContentType {
+    let mut seen = HashSet::new();
+    content_type_impl(pattern, &mut seen)
+}
+
+fn content_type_impl(pattern: &Pattern, seen: &mut HashSet<usize>) -> ContentType {
     if is_dead(pattern) {
         return ContentType::Empty;
     }
@@ -982,7 +988,20 @@ fn content_type(pattern: &Pattern) -> ContentType {
         Pattern::Empty | Pattern::NotAllowed => ContentType::Empty,
         Pattern::Element(_, _) => ContentType::Complex,
         Pattern::Text => ContentType::Complex,
-        Pattern::Ref(_, _, _) => ContentType::Complex,
+        Pattern::Ref(_, _, pat_ref) => {
+            let ptr = pat_ref.0.as_ptr() as usize;
+            if seen.contains(&ptr) {
+                // Cycle detected. Any cycle reachable from content context implies
+                // the pattern eventually contains elements → Complex.
+                return ContentType::Complex;
+            }
+            seen.insert(ptr);
+            if let Some(rule) = pat_ref.0.borrow().as_ref() {
+                content_type_impl(rule.pattern(), seen)
+            } else {
+                ContentType::Empty
+            }
+        }
         Pattern::DatatypeValue { .. } | Pattern::DatatypeName { .. } | Pattern::List(_) => {
             ContentType::Simple
         }
@@ -990,18 +1009,20 @@ fn content_type(pattern: &Pattern) -> ContentType {
         Pattern::Group(members) | Pattern::Interleave(members) => {
             members
                 .iter()
-                .map(|m| content_type(m))
+                .map(|m| content_type_impl(m, seen))
                 .max()
                 .unwrap_or(ContentType::Empty)
         }
         Pattern::Choice(alts) => {
             alts.iter()
                 .filter(|a| !is_dead(a))
-                .map(|a| content_type(a))
+                .map(|a| content_type_impl(a, seen))
                 .max()
                 .unwrap_or(ContentType::Empty)
         }
-        Pattern::OneOrMore(p) | Pattern::ZeroOrMore(p) | Pattern::Optional(p) => content_type(p),
+        Pattern::OneOrMore(p) | Pattern::ZeroOrMore(p) | Pattern::Optional(p) => {
+            content_type_impl(p, seen)
+        }
         Pattern::Mixed(_) => ContentType::Complex, // mixed = interleave(text, ...) and text is complex
     }
 }

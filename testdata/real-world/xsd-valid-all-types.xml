@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<types>
+  <integer>-42</integer>
+  <decimal>3.14159</decimal>
+  <boolean>true</boolean>
+  <date>2024-01-15</date>
+  <time>14:30:00</time>
+  <dateTime>2024-01-15T14:30:00Z</dateTime>
+  <gYear>2024</gYear>
+  <gYearMonth>2024-01</gYearMonth>
+  <gMonth>--01</gMonth>
+  <gMonthDay>--01-15</gMonthDay>
+  <gDay>---15</gDay>
+  <duration>P1Y2M3DT4H5M6S</duration>
+  <anyURI>http://example.com/path?q=1#frag</anyURI>
+  <language>en-US</language>
+  <NMTOKEN>my-token</NMTOKEN>
+  <NMTOKENS>token1 token2 token3</NMTOKENS>
+  <Name>my:element</Name>
+  <NCName>myElement</NCName>
+  <ID>unique-id-1</ID>
+  <IDREF>unique-id-1</IDREF>
+  <normalizedString>normalized text here</normalizedString>
+  <token>some token value</token>
+  <nonNegativeInteger>0</nonNegativeInteger>
+  <positiveInteger>1</positiveInteger>
+  <nonPositiveInteger>0</nonPositiveInteger>
+  <negativeInteger>-1</negativeInteger>
+  <long>9223372036854775807</long>
+  <int>2147483647</int>
+  <short>32767</short>
+  <byte>127</byte>
+  <unsignedLong>18446744073709551615</unsignedLong>
+  <unsignedInt>4294967295</unsignedInt>
+  <unsignedShort>65535</unsignedShort>
+  <unsignedByte>255</unsignedByte>
+  <float>1.5E10</float>
+  <double>1.5E100</double>
+  <base64Binary>SGVsbG8gV29ybGQ=</base64Binary>
+  <hexBinary>48656C6C6F</hexBinary>
+</types>
