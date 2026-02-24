@@ -1934,12 +1934,14 @@ mod tests {
 
     #[test]
     fn attribute_any_other_namespace() {
+        // Per section 7.3, attribute with infinite name class (anyName/nsName)
+        // must be inside oneOrMore
         Fixture::correct(
             "namespace local = \"\" \
              default namespace foo = \"urn:foo\" \
              element MPD { \
                 attribute mediaPresentationDuration { xsd:duration }?, \
-                attribute * - (foo:* | local:*)  { text } \
+                attribute * - (foo:* | local:*)  { text }* \
              }",
         )
         .invalid(
