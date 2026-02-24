@@ -123,7 +123,9 @@ The README notes two known issues:
    the validator's `ElementStack` is passed to `text_deriv` and used for
    namespace-aware QName comparison.
 
-### Phase 5: Real-World Schema Testing
+### Phase 5: Real-World Schema Testing (DONE)
+
+**Impact: 7 bugs found and fixed; 12/12 real-world test cases pass in CI.**
 
 **Goal: validate the implementation against real schemas and real documents;
 find and fix bugs not covered by the spectest suite.**
@@ -196,13 +198,33 @@ Based on what real-world schemas exercise versus the spectest corpus:
    recursive. A DocBook book or large ODF spreadsheet may overflow the default
    stack. May require `stacker` or iterative reformulation.
 
-#### Deliverables
+#### Deliverables (completed)
 
-- `tests/real_world.rs` — integration test file, initially gated behind
-  `#[ignore]` or a feature flag so CI doesn't require internet access
-- A `testdata/real-world/` directory with self-contained `(schema, document)`
-  pairs at small enough size to commit
-- A `BUGS.md` or issue list tracking every divergence found vs. Jing
+- `relaxng-validator/tests/real_world.rs` — 15 integration tests (12 active,
+  3 `#[ignore]`d for the known exponential-blowup issue tracked in Phase 6)
+- `testdata/real-world/` — 4 schemas and 15 self-contained XML documents
+- `BUGS.md` — full write-up of all 7 divergences found vs. Jing, with root
+  cause analysis and fix descriptions
+
+#### Bugs found and fixed
+
+| ID | Severity | Description |
+|----|----------|-------------|
+| B1 | Critical | CLI tool ignored `.rng` extension → always used compact parser |
+| B2 | High | Section 7 `Ref` content-type false positive blocked real-world schemas |
+| B3 | High | `NMTOKEN`/`NMTOKENS` validation called `unimplemented!()` → panic |
+| B4 | Medium | 17 XSD datatypes (`gYear`, `float`, `base64Binary`, …) unsupported |
+| B5 | Medium | `positiveInteger` incorrectly accepted 0 |
+| B6 | Medium | XSD `pattern` facet matched substrings instead of full values |
+| B7 | Low | `anyURI` rejected values with spaces (Jing accepts them) |
+
+#### Known remaining issue (deferred to Phase 6)
+
+Three Atom feed documents (`atom-valid-minimal.xml`, `atom-valid-full.xml`,
+`atom-valid-xhtml-content.xml`) trigger exponential blowup in the `choice()`
+derivative due to the `interleave` + `zeroOrMore(anyForeignElement)` pattern
+in the Atom `feed` element.  The fix (derivative deduplication) is tracked in
+Phase 6.  These tests are marked `#[ignore]` in `real_world.rs`.
 
 ---
 
@@ -231,5 +253,5 @@ Based on what real-world schemas exercise versus the spectest corpus:
 | Phase 2 (done) | Namespace + validation fixes | +27 | 97.7% (375/384) |
 | Phase 3 (done) | NCName/URI validation | +6 | 99.2% (381/384) |
 | Phase 4 (done) | QName namespace context | +3 | 100% (384/384) |
-| Phase 5 | Real-world schema testing | bugs TBD | 100% + real-world coverage |
+| Phase 5 (done) | Real-world schema testing | 7 bugs fixed | 100% + 12/12 real-world cases |
 | Phase 6 | Performance | +0 | ~100% (+ real-world usability) |
