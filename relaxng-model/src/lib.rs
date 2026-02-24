@@ -181,6 +181,14 @@ pub enum RelaxError {
     AnyNameInNsNameExcept,
     /// Section 7.1.1: nsName in except of nsName is forbidden
     NsNameInNsNameExcept,
+    /// Section 7.3: overlapping attribute name classes in group/interleave
+    OverlappingAttributes {
+        span: codemap::Span,
+    },
+    /// Section 7.4: overlapping element name classes in interleave
+    OverlappingElements {
+        span: codemap::Span,
+    },
 }
 
 enum Context<'a> {
@@ -1244,6 +1252,32 @@ impl<FS: Files> Compiler<FS> {
                 code: None,
                 spans: vec![],
             },
+            RelaxError::OverlappingAttributes { span } => {
+                let label = codemap_diagnostic::SpanLabel {
+                    span: *span,
+                    style: codemap_diagnostic::SpanStyle::Primary,
+                    label: Some("overlapping attribute name classes".to_string()),
+                };
+                codemap_diagnostic::Diagnostic {
+                    level: codemap_diagnostic::Level::Error,
+                    message: "Overlapping attribute name classes in group/interleave (section 7.3)".to_string(),
+                    code: None,
+                    spans: vec![label],
+                }
+            }
+            RelaxError::OverlappingElements { span } => {
+                let label = codemap_diagnostic::SpanLabel {
+                    span: *span,
+                    style: codemap_diagnostic::SpanStyle::Primary,
+                    label: Some("overlapping element name classes".to_string()),
+                };
+                codemap_diagnostic::Diagnostic {
+                    level: codemap_diagnostic::Level::Error,
+                    message: "Overlapping element name classes in interleave (section 7.4)".to_string(),
+                    code: None,
+                    spans: vec![label],
+                }
+            }
             _ => panic!("{err:?}"),
         }
     }
