@@ -89,7 +89,7 @@ pub struct ListPattern(pub Box<Pattern>);
 pub struct MixedPattern(pub Box<Pattern>);
 
 #[derive(Debug, PartialEq)]
-pub struct ExternalPattern(pub Literal, pub Option<Inherit>);
+pub struct ExternalPattern(pub Literal, pub Option<Inherit>, pub Option<Literal>);
 
 // DatatypeValuePattern & DatatypeNamePattern diverge in style between xml and compact syntaxes,
 // with compact syntax requiring the type name be qualified to identify the datatype-library, were
@@ -174,6 +174,7 @@ pub struct Include(
     pub Literal,
     pub Option<Inherit>,
     pub Option<Vec<IncludeContent>>,
+    pub Option<Literal>,
 );
 
 #[derive(Debug, PartialEq)]
