@@ -4,6 +4,15 @@
 //! defined in section 7 of the RELAX NG specification. This module implements
 //! those checks as a post-compilation pass.
 //!
+//! Important: The section 7 restrictions apply to the _fully simplified_ schema
+//! (after section 4 simplification). Since this codebase uses a partially
+//! simplified representation, we must account for simplification rules when
+//! checking restrictions. In particular:
+//!   - group/interleave containing notAllowed → notAllowed (skip checking)
+//!   - group/interleave with only empty + one real member → member (no group)
+//!   - choice containing notAllowed alternatives → drop those alternatives
+//!   - oneOrMore(notAllowed) → notAllowed
+//!
 //! Reference: <https://relaxng.org/spec-20011203.html#section7>
 
 use crate::RelaxError;
@@ -32,27 +41,72 @@ pub fn check_restrictions(
     Ok(())
 }
 
+// --- Simplification-aware helpers ---
+
+/// Returns true if a pattern simplifies to notAllowed per section 4 rules.
+/// A dead pattern should not trigger restriction violations because it would
+/// be eliminated during full simplification.
+fn is_dead(pattern: &Pattern) -> bool {
+    match pattern {
+        Pattern::NotAllowed => true,
+        Pattern::Group(members) | Pattern::Interleave(members) => {
+            // group/interleave with any dead member is dead
+            members.iter().any(|m| is_dead(m))
+        }
+        Pattern::OneOrMore(p) | Pattern::List(p) => is_dead(p),
+        Pattern::ZeroOrMore(_) => false, // zeroOrMore(notAllowed) = choice(oneOrMore(notAllowed), empty) = empty
+        Pattern::Choice(alts) => {
+            // choice is dead only if ALL alternatives are dead
+            alts.iter().all(|a| is_dead(a))
+        }
+        Pattern::Optional(_) => false, // optional(X) = choice(X, empty), and empty is not dead
+        // An attribute whose content is dead can never be satisfied
+        Pattern::Attribute(_, content) => is_dead(content),
+        // An element whose content is dead can never be satisfied
+        Pattern::Element(_, content) => is_dead(content),
+        _ => false,
+    }
+}
+
+/// Returns the count of "real" members in a group/interleave after removing
+/// empty members (since group(X, empty) simplifies to X in section 4).
+fn count_non_empty_members(members: &[Pattern]) -> usize {
+    members
+        .iter()
+        .filter(|m| !matches!(m, Pattern::Empty))
+        .count()
+}
+
 // --- 7.1.5: Start element restrictions ---
 //
 // The start pattern must only contain element, choice, ref, and notAllowed.
 // Forbidden: attribute, data, value, text, list, group, interleave, oneOrMore, empty.
-// We also treat Mixed (= interleave + text), Optional (= choice + empty),
-// and ZeroOrMore (= choice + oneOrMore + empty) as forbidden since their
-// simplified forms contain forbidden patterns.
+//
+// We handle unsimplified patterns:
+// - Optional(p) = choice(p, empty) → check p, the empty is fine in choice context
+// - Group/Interleave containing notAllowed → dead, skip
+// - Choice with notAllowed alternatives → skip those alternatives
 
 fn check_start(
     pattern: &Pattern,
     span: codemap::Span,
     seen: &mut HashSet<usize>,
 ) -> Result<(), RelaxError> {
+    // Dead patterns are fine -- they simplify to notAllowed which is allowed in start
+    if is_dead(pattern) {
+        return Ok(());
+    }
+
     match pattern {
         // Element is the desired content for start -- stop recursing
         Pattern::Element(_, _) => Ok(()),
 
-        // Choice is allowed -- recurse into alternatives
+        // Choice is allowed -- recurse into non-dead alternatives
         Pattern::Choice(alternatives) => {
             for alt in alternatives {
-                check_start(alt, span, seen)?;
+                if !is_dead(alt) {
+                    check_start(alt, span, seen)?;
+                }
             }
             Ok(())
         }
@@ -74,16 +128,35 @@ fn check_start(
             }
         }
 
+        // Optional(p) = choice(p, empty) -- check p under start rules
+        Pattern::Optional(content) => check_start(content, span, seen),
+
+        // Group/Interleave with a single non-empty member simplifies to that
+        // member (section 4: group(p, empty) = p, interleave(p, empty) = p).
+        // This arises from combine="choice"/"interleave" with a single definition.
+        Pattern::Group(members) | Pattern::Interleave(members) => {
+            let non_empty: Vec<_> = members
+                .iter()
+                .filter(|m| !matches!(m, Pattern::Empty))
+                .collect();
+            if non_empty.len() == 1 {
+                return check_start(non_empty[0], span, seen);
+            }
+            // Multi-member group/interleave is forbidden under start
+            if matches!(pattern, Pattern::Group(_)) {
+                Err(restricted(span, "group", "start"))
+            } else {
+                Err(restricted(span, "interleave", "start"))
+            }
+        }
+
         // Everything else is forbidden under start
         Pattern::Text => Err(restricted(span, "text", "start")),
         Pattern::Empty => Err(restricted(span, "empty", "start")),
         Pattern::Attribute(_, _) => Err(restricted(span, "attribute", "start")),
         Pattern::List(_) => Err(restricted(span, "list", "start")),
-        Pattern::Group(_) => Err(restricted(span, "group", "start")),
-        Pattern::Interleave(_) => Err(restricted(span, "interleave", "start")),
         Pattern::OneOrMore(_) => Err(restricted(span, "oneOrMore", "start")),
         Pattern::ZeroOrMore(_) => Err(restricted(span, "zeroOrMore", "start")),
-        Pattern::Optional(_) => Err(restricted(span, "optional", "start")),
         Pattern::Mixed(_) => Err(restricted(span, "mixed", "start")),
         Pattern::DatatypeValue { .. } => Err(restricted(span, "value", "start")),
         Pattern::DatatypeName { .. } => Err(restricted(span, "data", "start")),
@@ -113,6 +186,12 @@ fn check_pattern(
     span: codemap::Span,
     seen: &mut HashSet<usize>,
 ) -> Result<(), RelaxError> {
+    // Skip restriction checks on dead patterns -- they would be eliminated
+    // during full simplification (section 4)
+    if is_dead(pattern) {
+        return Ok(());
+    }
+
     match pattern {
         Pattern::Element(name_class, content) => {
             // Check name class restrictions
@@ -142,7 +221,7 @@ fn check_pattern(
             // 7.1.1: xmlns attribute restrictions
             check_attribute_name_class(name_class)?;
 
-            // Check name class restrictions
+            // Check name class restrictions (anyName/nsName except rules)
             check_name_class(name_class)?;
 
             let mut child_ctx = ctx.clone();
@@ -175,7 +254,10 @@ fn check_pattern(
 
         Pattern::Choice(alternatives) => {
             for alt in alternatives {
-                check_pattern(alt, ctx, span, seen)?;
+                // Skip dead alternatives -- they simplify away
+                if !is_dead(alt) {
+                    check_pattern(alt, ctx, span, seen)?;
+                }
             }
             Ok(())
         }
@@ -186,13 +268,16 @@ fn check_pattern(
                 return Err(restricted(span, "group", "data/except"));
             }
             // 7.1.2: entering group while inside oneOrMore activates the
-            // oneOrMore//group//attribute restriction
+            // oneOrMore//group//attribute restriction -- BUT only if the group
+            // has more than one non-empty member (otherwise it simplifies away)
             let mut child_ctx = ctx.clone();
-            if ctx.in_one_or_more {
+            if ctx.in_one_or_more && count_non_empty_members(members) > 1 {
                 child_ctx.in_one_or_more_group = true;
             }
             for m in members {
-                check_pattern(m, &child_ctx, span, seen)?;
+                if !is_dead(m) {
+                    check_pattern(m, &child_ctx, span, seen)?;
+                }
             }
             Ok(())
         }
@@ -207,13 +292,16 @@ fn check_pattern(
                 return Err(restricted(span, "interleave", "data/except"));
             }
             // 7.1.2: entering interleave while inside oneOrMore activates the
-            // oneOrMore//interleave//attribute restriction
+            // oneOrMore//interleave//attribute restriction -- only if the
+            // interleave has more than one non-empty member
             let mut child_ctx = ctx.clone();
-            if ctx.in_one_or_more {
+            if ctx.in_one_or_more && count_non_empty_members(members) > 1 {
                 child_ctx.in_one_or_more_group = true;
             }
             for m in members {
-                check_pattern(m, &child_ctx, span, seen)?;
+                if !is_dead(m) {
+                    check_pattern(m, &child_ctx, span, seen)?;
+                }
             }
             Ok(())
         }

@@ -1226,6 +1226,24 @@ impl<FS: Files> Compiler<FS> {
                 code: None,
                 spans: vec![],
             },
+            RelaxError::AnyNameInExcept => codemap_diagnostic::Diagnostic {
+                level: codemap_diagnostic::Level::Error,
+                message: "anyName is not allowed inside except of anyName (section 7.1.1)".to_string(),
+                code: None,
+                spans: vec![],
+            },
+            RelaxError::AnyNameInNsNameExcept => codemap_diagnostic::Diagnostic {
+                level: codemap_diagnostic::Level::Error,
+                message: "anyName is not allowed inside except of nsName (section 7.1.1)".to_string(),
+                code: None,
+                spans: vec![],
+            },
+            RelaxError::NsNameInNsNameExcept => codemap_diagnostic::Diagnostic {
+                level: codemap_diagnostic::Level::Error,
+                message: "nsName is not allowed inside except of nsName (section 7.1.1)".to_string(),
+                code: None,
+                spans: vec![],
+            },
             _ => panic!("{err:?}"),
         }
     }
