@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+  <head>
+    <title>XHTML with Table</title>
+    <meta name="author" content="Test Author"/>
+    <link rel="stylesheet" href="style.css" type="text/css"/>
+  </head>
+  <body>
+    <h1>Data Table</h1>
+    <table border="1" summary="Test data">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Value</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Row 1</td>
+          <td>42</td>
+        </tr>
+        <tr>
+          <td>Row 2</td>
+          <td>99</td>
+        </tr>
+      </tbody>
+    </table>
+    <dl>
+      <dt>Term 1</dt>
+      <dd>Definition of term 1</dd>
+      <dt>Term 2</dt>
+      <dd>Definition of term 2</dd>
+    </dl>
+  </body>
+</html>

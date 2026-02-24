@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Schema exercising a wide range of XSD datatypes.
+  Used to find gaps in the XSD datatype implementation.
+-->
+<grammar xmlns="http://relaxng.org/ns/structure/1.0"
+         datatypeLibrary="http://www.w3.org/2001/XMLSchema-datatypes">
+  <start>
+    <element name="types">
+      <interleave>
+        <optional>
+          <element name="integer"><data type="integer"/></element>
+        </optional>
+        <optional>
+          <element name="decimal"><data type="decimal"/></element>
+        </optional>
+        <optional>
+          <element name="boolean"><data type="boolean"/></element>
+        </optional>
+        <optional>
+          <element name="date"><data type="date"/></element>
+        </optional>
+        <optional>
+          <element name="time"><data type="time"/></element>
+        </optional>
+        <optional>
+          <element name="dateTime"><data type="dateTime"/></element>
+        </optional>
+        <optional>
+          <element name="gYear"><data type="gYear"/></element>
+        </optional>
+        <optional>
+          <element name="gYearMonth"><data type="gYearMonth"/></element>
+        </optional>
+        <optional>
+          <element name="gMonth"><data type="gMonth"/></element>
+        </optional>
+        <optional>
+          <element name="gMonthDay"><data type="gMonthDay"/></element>
+        </optional>
+        <optional>
+          <element name="gDay"><data type="gDay"/></element>
+        </optional>
+        <optional>
+          <element name="duration"><data type="duration"/></element>
+        </optional>
+        <optional>
+          <element name="anyURI"><data type="anyURI"/></element>
+        </optional>
+        <optional>
+          <element name="language"><data type="language"/></element>
+        </optional>
+        <optional>
+          <element name="NMTOKEN"><data type="NMTOKEN"/></element>
+        </optional>
+        <optional>
+          <element name="NMTOKENS"><data type="NMTOKENS"/></element>
+        </optional>
+        <optional>
+          <element name="Name"><data type="Name"/></element>
+        </optional>
+        <optional>
+          <element name="NCName"><data type="NCName"/></element>
+        </optional>
+        <optional>
+          <element name="ID"><data type="ID"/></element>
+        </optional>
+        <optional>
+          <element name="IDREF"><data type="IDREF"/></element>
+        </optional>
+        <optional>
+          <element name="normalizedString"><data type="normalizedString"/></element>
+        </optional>
+        <optional>
+          <element name="token"><data type="token"/></element>
+        </optional>
+        <optional>
+          <element name="nonNegativeInteger"><data type="nonNegativeInteger"/></element>
+        </optional>
+        <optional>
+          <element name="positiveInteger"><data type="positiveInteger"/></element>
+        </optional>
+        <optional>
+          <element name="nonPositiveInteger"><data type="nonPositiveInteger"/></element>
+        </optional>
+        <optional>
+          <element name="negativeInteger"><data type="negativeInteger"/></element>
+        </optional>
+        <optional>
+          <element name="long"><data type="long"/></element>
+        </optional>
+        <optional>
+          <element name="int"><data type="int"/></element>
+        </optional>
+        <optional>
+          <element name="short"><data type="short"/></element>
+        </optional>
+        <optional>
+          <element name="byte"><data type="byte"/></element>
+        </optional>
+        <optional>
+          <element name="unsignedLong"><data type="unsignedLong"/></element>
+        </optional>
+        <optional>
+          <element name="unsignedInt"><data type="unsignedInt"/></element>
+        </optional>
+        <optional>
+          <element name="unsignedShort"><data type="unsignedShort"/></element>
+        </optional>
+        <optional>
+          <element name="unsignedByte"><data type="unsignedByte"/></element>
+        </optional>
+        <optional>
+          <element name="float"><data type="float"/></element>
+        </optional>
+        <optional>
+          <element name="double"><data type="double"/></element>
+        </optional>
+        <optional>
+          <element name="base64Binary"><data type="base64Binary"/></element>
+        </optional>
+        <optional>
+          <element name="hexBinary"><data type="hexBinary"/></element>
+        </optional>
+        <optional>
+          <element name="QName"><data type="QName"/></element>
+        </optional>
+      </interleave>
+    </element>
+  </start>
+</grammar>

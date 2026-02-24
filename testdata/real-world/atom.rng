@@ -1,0 +1,330 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  RELAX NG schema for Atom 1.0
+  Based on RFC 4287 and standard Atom schema
+-->
+<grammar xmlns="http://relaxng.org/ns/structure/1.0"
+         xmlns:atom="http://www.w3.org/2005/Atom"
+         xmlns:xhtml="http://www.w3.org/1999/xhtml"
+         datatypeLibrary="http://www.w3.org/2001/XMLSchema-datatypes">
+
+  <start>
+    <choice>
+      <ref name="atomFeed"/>
+      <ref name="atomEntry"/>
+    </choice>
+  </start>
+
+  <!-- Common attributes -->
+  <define name="atomCommonAttributes">
+    <optional>
+      <attribute name="xml:base"><data type="anyURI"/></attribute>
+    </optional>
+    <optional>
+      <attribute name="xml:lang"><data type="string"/></attribute>
+    </optional>
+    <zeroOrMore>
+      <ref name="undefinedAttribute"/>
+    </zeroOrMore>
+  </define>
+
+  <define name="undefinedAttribute">
+    <attribute>
+      <anyName>
+        <except>
+          <nsName ns=""/>
+          <nsName ns="http://www.w3.org/XML/1998/namespace"/>
+        </except>
+      </anyName>
+    </attribute>
+  </define>
+
+  <define name="anyForeignElement">
+    <element>
+      <anyName>
+        <except>
+          <nsName ns="http://www.w3.org/2005/Atom"/>
+        </except>
+      </anyName>
+      <zeroOrMore>
+        <choice>
+          <attribute><anyName/></attribute>
+          <ref name="anyElement"/>
+        </choice>
+      </zeroOrMore>
+      <zeroOrMore>
+        <choice>
+          <ref name="anyElement"/>
+          <text/>
+        </choice>
+      </zeroOrMore>
+    </element>
+  </define>
+
+  <define name="anyElement">
+    <element>
+      <anyName/>
+      <zeroOrMore>
+        <choice>
+          <attribute><anyName/></attribute>
+          <ref name="anyElement"/>
+        </choice>
+      </zeroOrMore>
+      <zeroOrMore>
+        <choice>
+          <ref name="anyElement"/>
+          <text/>
+        </choice>
+      </zeroOrMore>
+    </element>
+  </define>
+
+  <!-- atomFeed -->
+  <define name="atomFeed">
+    <element name="atom:feed">
+      <ref name="atomCommonAttributes"/>
+      <interleave>
+        <zeroOrMore><ref name="atomAuthor"/></zeroOrMore>
+        <zeroOrMore><ref name="atomCategory"/></zeroOrMore>
+        <zeroOrMore><ref name="atomContributor"/></zeroOrMore>
+        <optional><ref name="atomGenerator"/></optional>
+        <optional><ref name="atomIcon"/></optional>
+        <zeroOrMore><ref name="atomLink"/></zeroOrMore>
+        <optional><ref name="atomLogo"/></optional>
+        <optional><ref name="atomRights"/></optional>
+        <optional><ref name="atomSubtitle"/></optional>
+        <ref name="atomTitle"/>
+        <ref name="atomUpdated"/>
+        <ref name="atomId"/>
+        <zeroOrMore><ref name="atomEntry"/></zeroOrMore>
+        <zeroOrMore><ref name="anyForeignElement"/></zeroOrMore>
+      </interleave>
+    </element>
+  </define>
+
+  <!-- atomEntry -->
+  <define name="atomEntry">
+    <element name="atom:entry">
+      <ref name="atomCommonAttributes"/>
+      <interleave>
+        <zeroOrMore><ref name="atomAuthor"/></zeroOrMore>
+        <zeroOrMore><ref name="atomCategory"/></zeroOrMore>
+        <optional><ref name="atomContent"/></optional>
+        <zeroOrMore><ref name="atomContributor"/></zeroOrMore>
+        <ref name="atomId"/>
+        <zeroOrMore><ref name="atomLink"/></zeroOrMore>
+        <optional><ref name="atomPublished"/></optional>
+        <optional><ref name="atomRights"/></optional>
+        <optional><ref name="atomSource"/></optional>
+        <optional><ref name="atomSummary"/></optional>
+        <ref name="atomTitle"/>
+        <ref name="atomUpdated"/>
+        <zeroOrMore><ref name="anyForeignElement"/></zeroOrMore>
+      </interleave>
+    </element>
+  </define>
+
+  <!-- Person constructs -->
+  <define name="atomPersonConstruct">
+    <ref name="atomCommonAttributes"/>
+    <interleave>
+      <ref name="atomName"/>
+      <optional><ref name="atomUri"/></optional>
+      <optional><ref name="atomEmail"/></optional>
+      <zeroOrMore><ref name="anyForeignElement"/></zeroOrMore>
+    </interleave>
+  </define>
+
+  <define name="atomAuthor">
+    <element name="atom:author"><ref name="atomPersonConstruct"/></element>
+  </define>
+
+  <define name="atomContributor">
+    <element name="atom:contributor"><ref name="atomPersonConstruct"/></element>
+  </define>
+
+  <define name="atomName">
+    <element name="atom:name"><text/></element>
+  </define>
+
+  <define name="atomUri">
+    <element name="atom:uri"><data type="anyURI"/></element>
+  </define>
+
+  <define name="atomEmail">
+    <element name="atom:email"><text/></element>
+  </define>
+
+  <!-- Text constructs -->
+  <define name="atomTextConstruct">
+    <ref name="atomCommonAttributes"/>
+    <choice>
+      <group>
+        <optional>
+          <attribute name="type"><value>text</value></attribute>
+        </optional>
+        <text/>
+      </group>
+      <group>
+        <attribute name="type"><value>html</value></attribute>
+        <text/>
+      </group>
+      <group>
+        <attribute name="type"><value>xhtml</value></attribute>
+        <element name="xhtml:div">
+          <zeroOrMore>
+            <choice>
+              <attribute><anyName/></attribute>
+              <ref name="anyElement"/>
+              <text/>
+            </choice>
+          </zeroOrMore>
+        </element>
+      </group>
+    </choice>
+  </define>
+
+  <define name="atomTitle">
+    <element name="atom:title"><ref name="atomTextConstruct"/></element>
+  </define>
+
+  <define name="atomSubtitle">
+    <element name="atom:subtitle"><ref name="atomTextConstruct"/></element>
+  </define>
+
+  <define name="atomSummary">
+    <element name="atom:summary"><ref name="atomTextConstruct"/></element>
+  </define>
+
+  <define name="atomRights">
+    <element name="atom:rights"><ref name="atomTextConstruct"/></element>
+  </define>
+
+  <!-- Date construct -->
+  <define name="atomDateConstruct">
+    <ref name="atomCommonAttributes"/>
+    <data type="dateTime"/>
+  </define>
+
+  <define name="atomUpdated">
+    <element name="atom:updated"><ref name="atomDateConstruct"/></element>
+  </define>
+
+  <define name="atomPublished">
+    <element name="atom:published"><ref name="atomDateConstruct"/></element>
+  </define>
+
+  <!-- Other elements -->
+  <define name="atomId">
+    <element name="atom:id">
+      <ref name="atomCommonAttributes"/>
+      <data type="anyURI"/>
+    </element>
+  </define>
+
+  <define name="atomLink">
+    <element name="atom:link">
+      <ref name="atomCommonAttributes"/>
+      <attribute name="href"><data type="anyURI"/></attribute>
+      <optional>
+        <attribute name="rel"><data type="string"/></attribute>
+      </optional>
+      <optional><attribute name="type"><data type="string"/></attribute></optional>
+      <optional><attribute name="hreflang"><data type="string"/></attribute></optional>
+      <optional><attribute name="title"><data type="string"/></attribute></optional>
+      <optional><attribute name="length"><data type="string"/></attribute></optional>
+    </element>
+  </define>
+
+  <define name="atomCategory">
+    <element name="atom:category">
+      <ref name="atomCommonAttributes"/>
+      <attribute name="term"><data type="string"/></attribute>
+      <optional><attribute name="scheme"><data type="anyURI"/></attribute></optional>
+      <optional><attribute name="label"><data type="string"/></attribute></optional>
+    </element>
+  </define>
+
+  <define name="atomGenerator">
+    <element name="atom:generator">
+      <ref name="atomCommonAttributes"/>
+      <optional><attribute name="uri"><data type="anyURI"/></attribute></optional>
+      <optional><attribute name="version"><data type="string"/></attribute></optional>
+      <text/>
+    </element>
+  </define>
+
+  <define name="atomIcon">
+    <element name="atom:icon">
+      <ref name="atomCommonAttributes"/>
+      <data type="anyURI"/>
+    </element>
+  </define>
+
+  <define name="atomLogo">
+    <element name="atom:logo">
+      <ref name="atomCommonAttributes"/>
+      <data type="anyURI"/>
+    </element>
+  </define>
+
+  <define name="atomContent">
+    <element name="atom:content">
+      <ref name="atomCommonAttributes"/>
+      <choice>
+        <group>
+          <optional>
+            <attribute name="type">
+              <choice>
+                <value>text</value>
+                <value>html</value>
+              </choice>
+            </attribute>
+          </optional>
+          <text/>
+        </group>
+        <group>
+          <attribute name="type"><value>xhtml</value></attribute>
+          <element name="xhtml:div">
+            <zeroOrMore>
+              <choice>
+                <attribute><anyName/></attribute>
+                <ref name="anyElement"/>
+                <text/>
+              </choice>
+            </zeroOrMore>
+          </element>
+        </group>
+        <group>
+          <attribute name="type"><data type="string"/></attribute>
+          <optional>
+            <attribute name="src"><data type="anyURI"/></attribute>
+          </optional>
+          <text/>
+        </group>
+      </choice>
+    </element>
+  </define>
+
+  <define name="atomSource">
+    <element name="atom:source">
+      <ref name="atomCommonAttributes"/>
+      <interleave>
+        <zeroOrMore><ref name="atomAuthor"/></zeroOrMore>
+        <zeroOrMore><ref name="atomCategory"/></zeroOrMore>
+        <zeroOrMore><ref name="atomContributor"/></zeroOrMore>
+        <optional><ref name="atomGenerator"/></optional>
+        <optional><ref name="atomIcon"/></optional>
+        <zeroOrMore><ref name="atomLink"/></zeroOrMore>
+        <optional><ref name="atomLogo"/></optional>
+        <optional><ref name="atomRights"/></optional>
+        <optional><ref name="atomSubtitle"/></optional>
+        <optional><ref name="atomTitle"/></optional>
+        <optional><ref name="atomUpdated"/></optional>
+        <optional><ref name="atomId"/></optional>
+        <zeroOrMore><ref name="anyForeignElement"/></zeroOrMore>
+      </interleave>
+    </element>
+  </define>
+
+</grammar>
