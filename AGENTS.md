@@ -33,6 +33,37 @@ Dependencies flow downward. Each crate has a single responsibility.
 
 ---
 
+## Reference Specification & Canonical Implementation
+
+When in doubt about correct behavior, consult these authoritative sources:
+
+### RELAX NG Specification
+
+- **Spec home:** <https://relaxng.org/>
+- **Section 7 (Restrictions):** The normative rules for what constitutes a valid simplified schema. This is the primary reference for Phase 1 work. See the [full spec](https://relaxng.org/spec-20011203.html), section 7.
+- **Derivative algorithm:** <https://relaxng.org/jclark/derivative.html> -- James Clark's paper describing the derivative-based validation approach this codebase implements.
+
+### Jing/Trang (Canonical Implementation)
+
+- **Repository:** <https://github.com/relaxng/jing-trang>
+- **Jing** is the canonical RELAX NG validator, written in Java by James Clark (the spec author). It is the reference implementation for correct behavior.
+- **Trang** is a multi-format schema converter (RNC <-> RNG <-> XSD <-> DTD).
+
+Use Jing/Trang as the ground truth when:
+- You need to understand what the correct behavior should be for an ambiguous test case
+- You want to compare error messages or validation outcomes
+- You're unsure how a spec rule should apply in a specific edge case
+- You need to understand how restriction checks interact with pattern simplification
+
+To test a schema against Jing locally (if Java is available):
+```bash
+java -jar jing.jar schema.rng document.xml
+```
+
+The RELAX NG spectest suite used in this project (`relaxng-validator/tests/spectest/`) is the same conformance suite that Jing passes fully. Any test case we fail that Jing passes represents a bug in our implementation, not an ambiguity in the spec.
+
+---
+
 ## Development Workflow
 
 ### Before You Start
