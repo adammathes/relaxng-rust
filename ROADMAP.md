@@ -21,6 +21,7 @@ The spectest suite (from the official RELAX NG test suite) shows:
 | After Phase 2 (Namespace + validation fixes) | 375 | 9 | 97.7% |
 | After Phase 3 (NCName/URI validation) | 381 | 3 | 99.2% |
 | After Phase 4 (QName namespace context) | 384 | 0 | 100.0% |
+| After Phase 6 (Performance) | 384 | 0 | 100.0% |
 
 ---
 
@@ -200,8 +201,7 @@ Based on what real-world schemas exercise versus the spectest corpus:
 
 #### Deliverables (completed)
 
-- `relaxng-validator/tests/real_world.rs` — 15 integration tests (12 active,
-  3 `#[ignore]`d for the known exponential-blowup issue tracked in Phase 6)
+- `relaxng-validator/tests/real_world.rs` — 15 integration tests (all active)
 - `testdata/real-world/` — 4 schemas and 15 self-contained XML documents
 - `BUGS.md` — full write-up of all 7 divergences found vs. Jing, with root
   cause analysis and fix descriptions
@@ -218,29 +218,56 @@ Based on what real-world schemas exercise versus the spectest corpus:
 | B6 | Medium | XSD `pattern` facet matched substrings instead of full values |
 | B7 | Low | `anyURI` rejected values with spaces (Jing accepts them) |
 
-#### Known remaining issue (deferred to Phase 6)
+#### Previously-known issue (FIXED in Phase 6)
 
 Three Atom feed documents (`atom-valid-minimal.xml`, `atom-valid-full.xml`,
-`atom-valid-xhtml-content.xml`) trigger exponential blowup in the `choice()`
-derivative due to the `interleave` + `zeroOrMore(anyForeignElement)` pattern
-in the Atom `feed` element.  The fix (derivative deduplication) is tracked in
-Phase 6.  These tests are marked `#[ignore]` in `real_world.rs`.
+`atom-valid-xhtml-content.xml`) previously triggered exponential blowup in the
+`choice()` derivative.  This was fixed in Phase 6 via choice-leaf deduplication
+and derivative memoization.  All three tests now run in under 1 second.
 
 ---
 
-### Phase 6: Performance
+### Phase 6: Performance (DONE)
 
-**Impact: no test fixes, but critical for real-world use**
+**Impact: exponential blowup eliminated; 3 real-world tests un-ignored; DocBook
+validation ~250× faster.**
 
-1. **Memoization / caching of derivatives** -- The derivative-based validation
-   algorithm can benefit from caching `deriv(pattern, token)` results.
+Three complementary optimisations, all in `relaxng-validator/src/lib.rs`:
 
-2. **Pattern interning** -- The `Pat` type is 208 bytes (per the TODO in the
-   validator). Shrink it or use arena allocation.
+1. **Choice-leaf deduplication** -- Implemented the algorithm from
+   [James Clark's paper](https://relaxng.org/jclark/derivative.html) in the
+   `choice()` constructor.  Before building `Choice(left, right)`, the left
+   operand's choice-leaves are collected into an `FnvHashSet<PatId>`, then the
+   right operand is walked and any leaf already present in the left is removed.
+   This keeps the choice tree linear in the number of *unique* leaves and
+   prevents the exponential blowup that occurred with interleave + zeroOrMore
+   patterns (e.g. the Atom feed schema).
 
-3. **Exponential blowup mitigation** -- Implement the technique from
-   [James Clark's paper](https://relaxng.org/jclark/derivative.html) to avoid
-   exponential blowup. Enable the `blowup` test.
+2. **Pat size reduction via Boxing** -- Boxed the large `Pat` variants
+   (`Attribute`, `Element`, `Datatype`, `DatatypeValue`, `DatatypeExcept`) so
+   that `Pat` is ~16 bytes instead of 208 bytes.  Since `Pat` is cloned on
+   every `patt()` lookup, this makes cloning ~13× cheaper and dramatically
+   improves cache behaviour.
+
+3. **Derivative memoization** -- Added per-event `HashMap<PatId, PatId>`
+   memoization caches to `text_deriv` and `start_tag_open_deriv` (the same
+   technique already used by `att_deriv`).  Within a single XML event, the same
+   sub-pattern always produces the same derivative, so the memo eliminates
+   redundant recomputation.  Also added zero-clone helper methods (`nullable`,
+   `is_not_allowed`, `is_empty`) that inspect a pattern by `PatId` without
+   cloning.
+
+#### Results
+
+| Test case | Before | After |
+|---|---|---|
+| `blowup` unit test | `#[ignore]` (hung) | 0.15 s ✅ |
+| `docbook_valid_article` | 89 s | 0.36 s ✅ |
+| `atom_valid_minimal` | `#[ignore]` (hung) | < 1 s ✅ |
+| `atom_valid_full` | `#[ignore]` (hung) | < 1 s ✅ |
+| `atom_valid_xhtml_content` | `#[ignore]` (hung) | < 1 s ✅ |
+| All 15 real-world tests | 12 pass / 3 ignored | **15 pass / 0 ignored** |
+| spectest suite | 384/384 | **384/384** (no regressions) |
 
 ---
 
@@ -254,4 +281,4 @@ Phase 6.  These tests are marked `#[ignore]` in `real_world.rs`.
 | Phase 3 (done) | NCName/URI validation | +6 | 99.2% (381/384) |
 | Phase 4 (done) | QName namespace context | +3 | 100% (384/384) |
 | Phase 5 (done) | Real-world schema testing | 7 bugs fixed | 100% + 12/12 real-world cases |
-| Phase 6 | Performance | +0 | ~100% (+ real-world usability) |
+| Phase 6 (done) | Performance | +0 | 100% + 15/15 real-world cases |

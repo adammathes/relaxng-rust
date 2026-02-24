@@ -45,11 +45,9 @@ Current problems,
  - ❌ RELAX NG reuses the XML Schema datatype definitions but here, few datatypes and their facets are currently
    implemented.  Hitting an unsupported case will currently panic, rather than accepting an invalid input, (These
    panics will go away once the full datatype library is implemented.)
- - ❌ The implementation is currently very slow (compared to the [Jing](https://github.com/relaxng/jing-trang)
-   implementation of RELAX NG validation, for example)
- - ❌ Suffers from
-   [exponential performance blow-up](https://relaxng.org/jclark/derivative.html#Avoiding_exponential_blowup) for
-   certain pathological schema structures
+ - ✅ Performance has been significantly improved: choice-leaf deduplication eliminates
+   [exponential blow-up](https://relaxng.org/jclark/derivative.html#Avoiding_exponential_blowup),
+   derivative memoization avoids redundant computation, and Pat boxing reduces clone overhead
 
 ## Subprojects
 
