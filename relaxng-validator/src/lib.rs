@@ -30,8 +30,8 @@ struct PatId(u32);
 //       1) includes 'Placeholder, but doesn't include nullability flags or 'After'
 //       2) excludes 'Placeholder', and includes nullability flags and 'After'
 
-// TODO: instances of Pat are currently 208 bytes, and are cloned regularly; shrink this for
-//       better performance
+// Large types (NameClass, Datatypes, DatatypeValues) are boxed to keep the Pat
+// enum small (~16 bytes) so that cloning during derivative computation is cheap.
 #[derive(PartialEq, Eq, Hash, Clone, Debug)]
 enum Pat {
     Choice(PatId, PatId, bool),
@@ -41,12 +41,11 @@ enum Pat {
     Empty,
     Text,
     NotAllowed,
-    Attribute(model::NameClass, PatId),
-    Element(model::NameClass, PatId),
-    // the Datatypes and DatatypeValues types are quite large, so we
-    Datatype(datatype::Datatypes),
-    DatatypeValue(datatype::DatatypeValues),
-    DatatypeExcept(datatype::Datatypes, PatId),
+    Attribute(Box<model::NameClass>, PatId),
+    Element(Box<model::NameClass>, PatId),
+    Datatype(Box<datatype::Datatypes>),
+    DatatypeValue(Box<datatype::DatatypeValues>),
+    DatatypeExcept(Box<datatype::Datatypes>, PatId),
     List(PatId),
     Placeholder(*const Option<relaxng_model::model::DefineRule>),
     After(PatId, PatId),
@@ -104,34 +103,94 @@ impl Schema {
         }
     }
     pub fn choice(&self, left: PatId, right: PatId) -> PatId {
-        // TODO:
-        //       "In order to avoid exponential blowup with some patterns, it is essential
-        //        for the choice function to eliminate redundant choices. Define the
-        //        choice-leaves of a pattern to be the concatenation of the choice-leaves of
-        //        its operands if the the pattern is a Choice pattern and the empty-list
-        //        otherwise. Eliminating redundant choices means ensuring that the list of
-        //        choice-leaves of the constructed pattern contains no duplicates. One way
-        //        to do this is to for choice to walk the choice-leaves of one operand building
-        //        a hash-table of the set of choice-leaves of that operand; then walk the other
-        //        operand using this hash-table to eliminate any choice-leaf that has occurred
-        //        in the other operand."
-        match (self.patt(left), self.patt(right)) {
-            (Pat::NotAllowed, _) => right,
-            (_, Pat::NotAllowed) => left,
-            (l, r) => {
-                if left == right {
-                    //println!("Choices are identical: left=right={:?} - {}", l, left.0);
-                    return left;
-                }
-                if l.is_nullable() {
-                    //println!("**redundant choice construction? l => nullable");
-                }
-                if r.is_nullable() {
-                    //println!("**redundant choice construction? r => nullable");
-                }
-                self.push(Pat::Choice(left, right, l.is_nullable() || r.is_nullable()))
+        // Eliminate redundant choice-leaves to avoid exponential blowup.
+        // See https://relaxng.org/jclark/derivative.html#Avoiding_exponential_blowup
+        //
+        // Walk the choice-leaves of the left operand into a hash-set, then
+        // filter the right operand, removing any leaf already present in the
+        // left.  This keeps the choice-tree linear in the number of unique
+        // leaves.
+        if self.is_not_allowed(left) {
+            return right;
+        }
+        if self.is_not_allowed(right) {
+            return left;
+        }
+        if left == right {
+            return left;
+        }
+        let mut left_leaves = fnv::FnvHashSet::default();
+        self.collect_choice_leaves(left, &mut left_leaves);
+        match self.filter_choice(right, &left_leaves) {
+            None => left, // every right leaf was a duplicate
+            Some(filtered_right) => {
+                let nullable = self.nullable(left) || self.nullable(filtered_right);
+                self.push(Pat::Choice(left, filtered_right, nullable))
             }
         }
+    }
+
+    /// Collect all non-Choice leaf PatIds from a choice tree.
+    fn collect_choice_leaves(&self, id: PatId, leaves: &mut fnv::FnvHashSet<PatId>) {
+        let inner = self.inner.borrow();
+        Self::collect_leaves_inner(&inner.patterns, id, leaves);
+    }
+
+    fn collect_leaves_inner(patterns: &[Pat], id: PatId, leaves: &mut fnv::FnvHashSet<PatId>) {
+        match &patterns[id.0 as usize] {
+            Pat::Choice(l, r, _) => {
+                Self::collect_leaves_inner(patterns, *l, leaves);
+                Self::collect_leaves_inner(patterns, *r, leaves);
+            }
+            _ => {
+                leaves.insert(id);
+            }
+        }
+    }
+
+    /// Walk a choice tree and remove any leaf whose PatId is in `exclude`.
+    /// Returns `None` if every leaf was removed.
+    fn filter_choice(&self, id: PatId, exclude: &fnv::FnvHashSet<PatId>) -> Option<PatId> {
+        if exclude.contains(&id) {
+            return None;
+        }
+        let children = {
+            let inner = self.inner.borrow();
+            match &inner.patterns[id.0 as usize] {
+                Pat::Choice(l, r, _) => Some((*l, *r)),
+                _ => None,
+            }
+        };
+        match children {
+            Some((l, r)) => {
+                let fl = self.filter_choice(l, exclude);
+                let fr = self.filter_choice(r, exclude);
+                match (fl, fr) {
+                    (None, None) => None,
+                    (Some(kept), None) | (None, Some(kept)) => Some(kept),
+                    (Some(fl), Some(fr)) => {
+                        let nullable = self.nullable(fl) || self.nullable(fr);
+                        Some(self.push(Pat::Choice(fl, fr, nullable)))
+                    }
+                }
+            }
+            None => Some(id), // non-Choice leaf, not excluded
+        }
+    }
+
+    /// Check nullability without cloning the pattern.
+    fn nullable(&self, id: PatId) -> bool {
+        self.inner.borrow().patterns[id.0 as usize].is_nullable()
+    }
+
+    /// Check if a pattern is NotAllowed without cloning.
+    fn is_not_allowed(&self, id: PatId) -> bool {
+        matches!(self.inner.borrow().patterns[id.0 as usize], Pat::NotAllowed)
+    }
+
+    /// Check if a pattern is Empty without cloning.
+    fn is_empty(&self, id: PatId) -> bool {
+        matches!(self.inner.borrow().patterns[id.0 as usize], Pat::Empty)
     }
     pub fn interleave(&self, left: PatId, right: PatId) -> PatId {
         match (self.patt(left), self.patt(right)) {
@@ -180,19 +239,19 @@ impl Schema {
         self.push(Pat::OneOrMore(pattern, p.is_nullable()))
     }
     fn attribute(&self, name: model::NameClass, p: PatId) -> PatId {
-        self.push(Pat::Attribute(name, p))
+        self.push(Pat::Attribute(Box::new(name), p))
     }
     fn element(&self, name: model::NameClass, p: PatId) -> PatId {
-        self.push(Pat::Element(name, p))
+        self.push(Pat::Element(Box::new(name), p))
     }
     fn datatype_value(&self, dt: datatype::DatatypeValues) -> PatId {
-        self.push(Pat::DatatypeValue(dt))
+        self.push(Pat::DatatypeValue(Box::new(dt)))
     }
     fn datatype_name(&self, dt: datatype::Datatypes, except: Option<PatId>) -> PatId {
         if let Some(except) = except {
-            self.push(Pat::DatatypeExcept(dt, except))
+            self.push(Pat::DatatypeExcept(Box::new(dt), except))
         } else {
-            self.push(Pat::Datatype(dt))
+            self.push(Pat::Datatype(Box::new(dt)))
         }
     }
     fn list(&self, p: PatId) -> PatId {
@@ -653,11 +712,16 @@ impl<'a> Validator<'a> {
         if self.text_buffer.is_empty() {
             return Ok(());
         }
-        let pat = self.schema.patt(self.current_step);
-        let next_id = Self::text_deriv(pat, &mut self.schema, &self.text_buffer, &self.stack);
-        let next_pat = self.schema.patt(next_id);
+        let mut memo = HashMap::new();
+        let next_id = Self::text_deriv_id(
+            &mut memo,
+            self.current_step,
+            &mut self.schema,
+            &self.text_buffer,
+            &self.stack,
+        );
         self.text_buffer.clear();
-        if let Pat::NotAllowed = next_pat {
+        if self.schema.is_not_allowed(next_id) {
             Err(())
         } else {
             self.current_step = next_id;
@@ -711,8 +775,7 @@ impl<'a> Validator<'a> {
                         // Flush any buffered text before processing end tag
                         self.flush_text_buffer()
                             .map_err(|()| ValidatorError::NotAllowed(evt))?;
-                        let pat = self.schema.patt(self.current_step);
-                        let next_pat = if self.last_was_start_element {
+                        let next_id = if self.last_was_start_element {
                             // The last event was the opening of an element with no child elements
                             // or child text nodes.
                             //
@@ -723,23 +786,36 @@ impl<'a> Validator<'a> {
                             //
                             // This fake text node is required for a pattern like 'element foo { token }'
                             // to match the input '<foo></foo>'
-                            let p = Self::text_deriv(pat, &mut self.schema, "", &self.stack);
-                            self.schema.patt(p)
+                            let mut memo = HashMap::new();
+                            Self::text_deriv_id(
+                                &mut memo,
+                                self.current_step,
+                                &mut self.schema,
+                                "",
+                                &self.stack,
+                            )
                         } else {
-                            pat
+                            self.current_step
                         };
+                        let next_pat = self.schema.patt(next_id);
                         Self::end_tag_deriv(next_pat, &mut self.schema)
                     }
                     ElementEnd::Empty => {
                         let next_id =
                             Self::close_element_start(&self.stack, &mut self.schema, evt, pat)?;
-                        let pat = self.schema.patt(next_id);
                         // Self-closing elements like <foo/> always have no children.
                         // Per https://relaxng.org/jclark/derivative.html ,
                         //     "The case where the list of children is empty is
                         //      treated as if there were a text node whose value
                         //      were the empty string."
-                        let p = Self::text_deriv(pat, &mut self.schema, "", &self.stack);
+                        let mut memo = HashMap::new();
+                        let p = Self::text_deriv_id(
+                            &mut memo,
+                            next_id,
+                            &mut self.schema,
+                            "",
+                            &self.stack,
+                        );
                         let next_pat = self.schema.patt(p);
                         Self::end_tag_deriv(next_pat, &mut self.schema)
                     }
@@ -884,47 +960,63 @@ impl<'a> Validator<'a> {
     }
 
     fn text_deriv(current: Pat, schema: &mut Schema, text: &str, ns: &dyn Namespaces) -> PatId {
-        // TODO: do we need to memoize here per att_deriv() ?
-        match current {
+        let mut memo = HashMap::new();
+        let id = schema.push(current);
+        Self::text_deriv_memo(&mut memo, id, schema, text, ns)
+    }
+
+    fn text_deriv_id(
+        memo: &mut HashMap<PatId, PatId>,
+        id: PatId,
+        schema: &mut Schema,
+        text: &str,
+        ns: &dyn Namespaces,
+    ) -> PatId {
+        Self::text_deriv_memo(memo, id, schema, text, ns)
+    }
+
+    fn text_deriv_memo(
+        memo: &mut HashMap<PatId, PatId>,
+        id: PatId,
+        schema: &mut Schema,
+        text: &str,
+        ns: &dyn Namespaces,
+    ) -> PatId {
+        if let Some(&result) = memo.get(&id) {
+            return result;
+        }
+        let current = schema.patt(id);
+        let result = match current {
             Pat::Choice(p1, p2, _) => {
-                let p1 = schema.patt(p1);
-                let p2 = schema.patt(p2);
-                let a = Self::text_deriv(p1, schema, text, ns);
-                let b = Self::text_deriv(p2, schema, text, ns);
+                let a = Self::text_deriv_memo(memo, p1, schema, text, ns);
+                let b = Self::text_deriv_memo(memo, p2, schema, text, ns);
                 schema.choice(a, b)
             }
             Pat::Interleave(p1, p2, _) => {
-                let pat1 = schema.patt(p1);
-                let pat2 = schema.patt(p2);
-
-                let d1 = Self::text_deriv(pat1, schema, text, ns);
+                let d1 = Self::text_deriv_memo(memo, p1, schema, text, ns);
                 let a = schema.interleave(d1, p2);
 
-                let d2 = Self::text_deriv(pat2, schema, text, ns);
+                let d2 = Self::text_deriv_memo(memo, p2, schema, text, ns);
                 let b = schema.interleave(p1, d2);
                 schema.choice(a, b)
             }
             Pat::Group(p1, p2, _) => {
-                let pat1 = schema.patt(p1);
-                let nullable = pat1.is_nullable();
-                let pat2 = schema.patt(p2);
-                let d1 = Self::text_deriv(pat1, schema, text, ns);
+                let nullable = schema.nullable(p1);
+                let d1 = Self::text_deriv_memo(memo, p1, schema, text, ns);
                 let p = schema.group(d1, p2);
                 if nullable {
-                    let d2 = Self::text_deriv(pat2, schema, text, ns);
+                    let d2 = Self::text_deriv_memo(memo, p2, schema, text, ns);
                     schema.choice(p, d2)
                 } else {
                     p
                 }
             }
             Pat::After(p1, p2) => {
-                let pat1 = schema.patt(p1);
-                let d = Self::text_deriv(pat1, schema, text, ns);
+                let d = Self::text_deriv_memo(memo, p1, schema, text, ns);
                 schema.after(d, p2)
             }
             Pat::OneOrMore(p, _) => {
-                let pat = schema.patt(p);
-                let d = Self::text_deriv(pat, schema, text, ns);
+                let d = Self::text_deriv_memo(memo, p, schema, text, ns);
                 schema.group(d, schema.choice(schema.one_or_more(p), schema.empty()))
             }
             Pat::Text => schema.text(),
@@ -943,10 +1035,8 @@ impl<'a> Validator<'a> {
                 }
             }
             Pat::DatatypeExcept(dt, except) => {
-                let pat = schema.patt(except);
-                let d = Self::text_deriv(pat, schema, text, ns);
-                let pat2 = schema.patt(d);
-                if dt.is_valid(text) && !pat2.is_nullable() {
+                let d = Self::text_deriv_memo(memo, except, schema, text, ns);
+                if dt.is_valid(text) && !schema.nullable(d) {
                     schema.empty()
                 } else {
                     schema.not_allowed()
@@ -955,37 +1045,20 @@ impl<'a> Validator<'a> {
             Pat::List(p) => {
                 let mut p = p;
                 for item in text.split_whitespace() {
-                    let pat = schema.patt(p);
-                    p = Self::text_deriv(pat, schema, item, ns);
-                    if let Pat::NotAllowed = schema.patt(p) {
+                    p = Self::text_deriv_memo(memo, p, schema, item, ns);
+                    if schema.is_not_allowed(p) {
                         return p;
                     }
                 }
-                let last_patt = schema.patt(p);
-                if let Pat::Empty = last_patt {
+                if schema.is_empty(p) {
                     p
-                } else if last_patt.is_nullable() {
-                    // List is not able to be nullable per https://relaxng.org/jclark/derivative.html
-                    // but that definition assumes that we can see all text content up-front
-                    // whereas processing instructions CDATA sections etc may mean we see
-                    // text children piecemeal here.  To accommodate this, we make the list
-                    // optional here (TODO: should we rather adjust List to be nullable?)
+                } else if schema.nullable(p) {
                     schema.choice(schema.list(p), schema.empty())
                 } else {
                     schema.list(p)
                 }
             }
             Pat::Empty => {
-                // from 'An algorithm for RELAX NG validation':
-                //   "In the case where the list of children consists of a single text node and the
-                //    value of the text node consists only of whitespace, the list of children
-                //    matches if the list matches either with or without stripping the text node."
-                //   "Otherwise, there must be one or more elements amongst the children, in which
-                //    case any whitespace-only text nodes are stripped before the derivative is
-                //    computed."
-                // The document assumes however that we can see the list of child nodes, so we need
-                // to handle this case in a streaming manner.  Right now we don't track that
-                // that this pattern is being tested in the context of child nodes - FIXME!
                 if xml::common::is_whitespace_str(text) {
                     schema.empty()
                 } else {
@@ -995,55 +1068,64 @@ impl<'a> Validator<'a> {
             Pat::NotAllowed | Pat::Attribute(_, _) => schema.not_allowed(),
             Pat::Element(_, _) => {
                 if xml::common::is_whitespace_str(text) {
-                    schema.push(current) // TODO: just have the PatId to hand
+                    id
                 } else {
                     schema.not_allowed()
                 }
             }
             Pat::Placeholder(name) => unreachable!("Placeholder {:?}", name),
-        }
+        };
+        memo.insert(id, result);
+        result
     }
 
     fn start_tag_open_deriv(current: Pat, schema: &mut Schema, name: QualifiedName<'a>) -> PatId {
-        match current {
+        let mut memo = HashMap::new();
+        let id = schema.push(current);
+        Self::start_tag_open_deriv_memo(&mut memo, id, schema, name)
+    }
+
+    fn start_tag_open_deriv_memo(
+        memo: &mut HashMap<PatId, PatId>,
+        id: PatId,
+        schema: &mut Schema,
+        name: QualifiedName<'a>,
+    ) -> PatId {
+        if let Some(&result) = memo.get(&id) {
+            return result;
+        }
+        let current = schema.patt(id);
+        let result = match current {
             Pat::Choice(l, r, _) => {
-                let left = schema.patt(l);
-                let right = schema.patt(r);
-                let d1 = Self::start_tag_open_deriv(left, schema, name);
-                let d2 = Self::start_tag_open_deriv(right, schema, name);
+                let d1 = Self::start_tag_open_deriv_memo(memo, l, schema, name);
+                let d2 = Self::start_tag_open_deriv_memo(memo, r, schema, name);
                 schema.choice(d1, d2)
             }
             Pat::OneOrMore(pid, _) => {
-                let p = schema.patt(pid);
-                let deriv = Self::start_tag_open_deriv(p, schema, name);
+                let deriv = Self::start_tag_open_deriv_memo(memo, pid, schema, name);
                 Self::apply_after(schema.patt(deriv), schema, |pat, schema| {
                     schema.group(pat, schema.choice(schema.one_or_more(pid), schema.empty()))
                 })
             }
             Pat::Interleave(pid1, pid2, _) => {
-                let p1 = schema.patt(pid1);
-                let p2 = schema.patt(pid2);
-                let d1 = Self::start_tag_open_deriv(p1, schema, name);
+                let d1 = Self::start_tag_open_deriv_memo(memo, pid1, schema, name);
                 let c1 = Self::apply_after(schema.patt(d1), schema, |pat, schema| {
                     schema.interleave(pat, pid2)
                 });
-                let d2 = Self::start_tag_open_deriv(p2, schema, name);
+                let d2 = Self::start_tag_open_deriv_memo(memo, pid2, schema, name);
                 let c2 = Self::apply_after(schema.patt(d2), schema, |pat, schema| {
                     schema.interleave(pid1, pat)
                 });
                 schema.choice(c1, c2)
             }
             Pat::Group(pid1, pid2, _) => {
-                let p1 = schema.patt(pid1);
-                let nullable = p1.is_nullable();
-                let _p2 = schema.patt(pid2);
-                let d1 = Self::start_tag_open_deriv(p1, schema, name);
+                let nullable = schema.nullable(pid1);
+                let d1 = Self::start_tag_open_deriv_memo(memo, pid1, schema, name);
                 let x = Self::apply_after(schema.patt(d1), schema, |pat, schema| {
                     schema.group(pat, pid2)
                 });
                 if nullable {
-                    let p2 = schema.patt(pid2);
-                    let d2 = Self::start_tag_open_deriv(p2, schema, name);
+                    let d2 = Self::start_tag_open_deriv_memo(memo, pid2, schema, name);
                     schema.choice(x, d2)
                 } else {
                     x
@@ -1058,8 +1140,7 @@ impl<'a> Validator<'a> {
                 }
             }
             Pat::After(pid1, pid2) => {
-                let p1 = schema.patt(pid1);
-                let d = Self::start_tag_open_deriv(p1, schema, name);
+                let d = Self::start_tag_open_deriv_memo(memo, pid1, schema, name);
                 Self::apply_after(schema.patt(d), schema, |pat, schema| {
                     schema.after(pat, pid2)
                 })
@@ -1074,7 +1155,9 @@ impl<'a> Validator<'a> {
             | Pat::DatatypeExcept(_, _)
             | Pat::List(_) => schema.not_allowed(),
             Pat::Placeholder(name) => unreachable!("Placeholder {:?}", name),
-        }
+        };
+        memo.insert(id, result);
+        result
     }
 
     // in the spec, the applyAfter() 'f' argument comes before the pattern, in rust it's more
@@ -1962,7 +2045,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "we need some optimisations in place to avoid exponential blow-up"]
     fn blowup() {
         // https://relaxng.org/jclark/derivative.html#Avoiding_exponential_blowup
         Fixture::correct(

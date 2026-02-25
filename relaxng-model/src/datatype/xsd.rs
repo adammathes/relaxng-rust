@@ -265,16 +265,23 @@ impl super::Datatype for XsdDatatypes {
             XsdDatatypes::Base64Binary(len) => {
                 BASE64_RE.is_match(value) && {
                     // length facet counts decoded octets
-                    let stripped: String = value.chars().filter(|c| !c.is_ascii_whitespace()).collect();
+                    let stripped: String =
+                        value.chars().filter(|c| !c.is_ascii_whitespace()).collect();
                     // base64 string length in chars / 4 * 3 (minus padding)
                     let char_len = stripped.len();
                     let pad = stripped.chars().rev().take_while(|&c| c == '=').count();
-                    let decoded_len = if char_len == 0 { 0 } else { char_len * 3 / 4 - pad };
+                    let decoded_len = if char_len == 0 {
+                        0
+                    } else {
+                        char_len * 3 / 4 - pad
+                    };
                     match len {
                         LengthFacet::Unbounded => true,
                         LengthFacet::MinLength(min) => decoded_len >= *min,
                         LengthFacet::MaxLength(max) => decoded_len <= *max,
-                        LengthFacet::MinMaxLength(min, max) => decoded_len >= *min && decoded_len <= *max,
+                        LengthFacet::MinMaxLength(min, max) => {
+                            decoded_len >= *min && decoded_len <= *max
+                        }
                         LengthFacet::Length(l) => decoded_len == *l,
                     }
                 }
@@ -287,7 +294,9 @@ impl super::Datatype for XsdDatatypes {
                         LengthFacet::Unbounded => true,
                         LengthFacet::MinLength(min) => octet_len >= *min,
                         LengthFacet::MaxLength(max) => octet_len <= *max,
-                        LengthFacet::MinMaxLength(min, max) => octet_len >= *min && octet_len <= *max,
+                        LengthFacet::MinMaxLength(min, max) => {
+                            octet_len >= *min && octet_len <= *max
+                        }
                         LengthFacet::Length(l) => octet_len == *l,
                     }
                 }
@@ -990,13 +999,12 @@ impl Compiler {
                         facet,
                     })
             }
-            "hexBinary" => {
-                self.hex_binary(ctx, params)
-                    .map_err(|facet| XsdDatatypeError::Facet {
-                        type_name: "hexBinary",
-                        facet,
-                    })
-            }
+            "hexBinary" => self
+                .hex_binary(ctx, params)
+                .map_err(|facet| XsdDatatypeError::Facet {
+                    type_name: "hexBinary",
+                    facet,
+                }),
             "gYear" => self
                 .pattern_only(ctx, params, XsdDatatypes::GYear)
                 .map_err(|facet| XsdDatatypeError::Facet {
@@ -1046,12 +1054,13 @@ impl Compiler {
                 }
                 Ok(XsdDatatypes::QNameData)
             }
-            "ENTITY" | "ENTITIES" => self
-                .length_only(ctx, params, XsdDatatypes::Entity)
-                .map_err(|facet| XsdDatatypeError::Facet {
-                    type_name: "ENTITY",
-                    facet,
-                }),
+            "ENTITY" | "ENTITIES" => {
+                self.length_only(ctx, params, XsdDatatypes::Entity)
+                    .map_err(|facet| XsdDatatypeError::Facet {
+                        type_name: "ENTITY",
+                        facet,
+                    })
+            }
             "time" => self
                 .pattern_only(ctx, params, XsdDatatypes::Time)
                 .map_err(|facet| XsdDatatypeError::Facet {
@@ -2028,10 +2037,7 @@ impl QNameVal {
     }
 
     /// Resolve a QName string using a dynamic namespace context (for instance validation).
-    pub(crate) fn from_val_with_dyn_ns(
-        val: &str,
-        ns: &dyn super::Namespaces,
-    ) -> Result<Self, ()> {
+    pub(crate) fn from_val_with_dyn_ns(val: &str, ns: &dyn super::Namespaces) -> Result<Self, ()> {
         if let Some(pos) = val.find(':') {
             let prefix = &val[0..pos];
             let localname = &val[pos + 1..];
