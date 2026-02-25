@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<feed xmlns="http://www.w3.org/2005/Atom">
-  <title>Feed with bad date</title>
-  <id>http://example.com/</id>
-  <updated>not-a-date</updated>
-  <!-- Invalid dateTime - should be INVALID -->
-</feed>

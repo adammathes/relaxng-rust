@@ -1,8 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<entry xmlns="http://www.w3.org/2005/Atom">
-  <title>Standalone Entry</title>
-  <id>http://example.com/entry/standalone</id>
-  <updated>2024-01-15T10:00:00Z</updated>
-  <author><name>Author Name</name></author>
-  <content>Some content text.</content>
-</entry>

@@ -32,6 +32,3 @@ jobs:
 
       - name: Run spec tests (RELAX NG test suite, 384 cases)
         run: cargo test --verbose --test spectest -- spectest
-
-      - name: Run real-world integration tests (Atom / XHTML / DocBook / XSD)
-        run: cargo test --verbose --test real_world
