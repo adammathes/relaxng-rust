@@ -64,6 +64,12 @@ The RELAX NG spectest suite used in this project (`relaxng-validator/tests/spect
 
 ---
 
+## Important Rules
+
+- **Do NOT download or fetch external files into the repository.** Do not use curl, wget, or any other method to download schemas, XML documents, or other artifacts from the internet and commit them. All test data must be small, hand-written, and self-contained. Stress tests should generate their schemas and documents programmatically at runtime (using tempfiles), not check in large files.
+
+---
+
 ## Development Workflow
 
 ### Before You Start
