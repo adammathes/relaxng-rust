@@ -37,6 +37,9 @@
       <attribute name="xml:lang"><data type="language"/></attribute>
     </optional>
     <optional>
+      <attribute name="lang"><data type="language"/></attribute>
+    </optional>
+    <optional>
       <attribute name="dir">
         <choice><value>ltr</value><value>rtl</value></choice>
       </attribute>

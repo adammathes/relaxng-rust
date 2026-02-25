@@ -97,9 +97,24 @@
     <optional><attribute name="transform"><data type="string"/></attribute></optional>
   </define>
 
+  <!-- SVG event attributes (SVG 1.1 §18.4) -->
+  <define name="svg.event.attrib">
+    <optional><attribute name="onload"><data type="string"/></attribute></optional>
+    <optional><attribute name="onclick"><data type="string"/></attribute></optional>
+    <optional><attribute name="onmousedown"><data type="string"/></attribute></optional>
+    <optional><attribute name="onmouseup"><data type="string"/></attribute></optional>
+    <optional><attribute name="onmouseover"><data type="string"/></attribute></optional>
+    <optional><attribute name="onmousemove"><data type="string"/></attribute></optional>
+    <optional><attribute name="onmouseout"><data type="string"/></attribute></optional>
+    <optional><attribute name="onfocusin"><data type="string"/></attribute></optional>
+    <optional><attribute name="onfocusout"><data type="string"/></attribute></optional>
+    <optional><attribute name="onactivate"><data type="string"/></attribute></optional>
+  </define>
+
   <define name="svg.common.attrib">
     <ref name="svg.core.attrib"/>
     <ref name="svg.presentation.attrib"/>
+    <ref name="svg.event.attrib"/>
   </define>
 
   <!-- ═══════════════════════════════════════════════════════════════════════
@@ -139,6 +154,8 @@
         <ref name="marker"/>
         <!-- Pattern -->
         <ref name="pattern"/>
+        <!-- Script -->
+        <ref name="script-elem"/>
       </choice>
     </zeroOrMore>
   </define>
@@ -222,6 +239,15 @@
   <define name="metadata">
     <element name="metadata">
       <ref name="svg.core.attrib"/>
+      <text/>
+    </element>
+  </define>
+
+  <define name="script-elem">
+    <element name="script">
+      <ref name="svg.core.attrib"/>
+      <optional><attribute name="type"><data type="string"/></attribute></optional>
+      <optional><attribute name="xlink:href"><data type="anyURI"/></attribute></optional>
       <text/>
     </element>
   </define>
