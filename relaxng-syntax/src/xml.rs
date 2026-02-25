@@ -965,7 +965,6 @@ fn ident(range: Range<usize>, val: &str) -> Result<Identifier> {
     Ok(Identifier(range, val.to_string()))
 }
 
-
 fn is_el(node: Node, name: &'static str) -> bool {
     node.is_element() && node.tag_name().name() == name && is_rng_node(node)
 }

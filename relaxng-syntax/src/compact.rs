@@ -1,4 +1,6 @@
-use crate::ncname::{is_nc_name_char as is_nc_name_char_fn, is_nc_name_start_char as is_nc_name_start_char_fn};
+use crate::ncname::{
+    is_nc_name_char as is_nc_name_char_fn, is_nc_name_start_char as is_nc_name_start_char_fn,
+};
 use crate::types::*;
 use nom::character::complete::satisfy;
 use nom::combinator::cut;
@@ -9,10 +11,7 @@ use nom::{
     AsChar, IResult,
     branch::alt,
     bytes::complete::{is_not, tag, take_until},
-    character::{
-        complete::multispace1,
-        streaming::not_line_ending,
-    },
+    character::{complete::multispace1, streaming::not_line_ending},
     combinator::{all_consuming, map, not, opt, peek, recognize},
     error::ErrorKind,
     multi::{fold_many0, fold_many1, many0, separated_list0},
@@ -453,7 +452,9 @@ fn external_pattern(input: Span) -> IResult<Span, ExternalPattern> {
         opt(map((space_comment1, inherit), |(_, inherit)| inherit)),
     );
 
-    let mut parser = map(parse, |(_, _, uri, inherit)| ExternalPattern(uri, inherit, None));
+    let mut parser = map(parse, |(_, _, uri, inherit)| {
+        ExternalPattern(uri, inherit, None)
+    });
 
     parser.parse(input)
 }
@@ -493,7 +494,9 @@ fn group_pattern(input: Span) -> IResult<Span, Pattern> {
 fn datatype_value_pattern(input: Span) -> IResult<Span, DatatypeValuePattern> {
     let parse = (opt(datatype_name), space_comment0, datatype_value);
 
-    let mut parser = map(parse, |(name, _, value)| DatatypeValuePattern(name, value, vec![]));
+    let mut parser = map(parse, |(name, _, value)| {
+        DatatypeValuePattern(name, value, vec![])
+    });
 
     parser.parse(input)
 }
