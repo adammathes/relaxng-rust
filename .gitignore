@@ -1,2 +1,5 @@
 target/
 Cargo.lock
+
+# Downloaded real-world schemas (populated by testdata/download.sh)
+testdata/real-world/
