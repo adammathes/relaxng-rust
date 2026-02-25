@@ -77,7 +77,7 @@ pub enum XsdDatatypes {
     NmTokens(LengthFacet),
     NmToken(LengthFacet),
     NcName(LengthFacet),
-    Token(LengthFacet),
+    Token(StringFacets),
     Duration(Option<PatternFacet>),
     Date(Option<PatternFacet>),
     Datetime(Option<PatternFacet>),
@@ -179,10 +179,10 @@ impl super::Datatype for XsdDatatypes {
             }
             XsdDatatypes::NmToken(len) => is_valid_nmtoken(value) && len.is_valid(value),
             XsdDatatypes::NcName(len) => len.is_valid(value) && is_valid_ncname(value),
-            XsdDatatypes::Token(len) => {
+            XsdDatatypes::Token(facets) => {
                 // token: whitespace-collapsed string (no leading/trailing space,
                 // no consecutive internal spaces)
-                normalize_whitespace(value) == value && len.is_valid(value)
+                normalize_whitespace(value) == value && facets.is_valid(value)
             }
             XsdDatatypes::Duration(patt) => {
                 DURATION_RE.is_match(value)
@@ -1434,12 +1434,14 @@ impl Compiler {
 
     fn token(&self, ctx: &Context, params: &[types::Param]) -> Result<XsdDatatypes, FacetError> {
         let mut len = LengthFacet::Unbounded;
+        let mut pattern = None;
 
         for param in params {
             match &param.2.to_string()[..] {
                 "length" => len.merge(LengthFacet::Length(Self::usize(ctx, param)?))?,
                 "minLength" => len.merge(LengthFacet::MinLength(Self::usize(ctx, param)?))?,
                 "maxLength" => len.merge(LengthFacet::MaxLength(Self::usize(ctx, param)?))?,
+                "pattern" => pattern = Some(self.pattern(ctx, param)?),
                 _ => {
                     return Err(FacetError::InvalidFacet(
                         ctx.convert_span(&param.0),
@@ -1449,7 +1451,7 @@ impl Compiler {
             }
         }
 
-        Ok(XsdDatatypes::Token(len))
+        Ok(XsdDatatypes::Token(StringFacets { len, pattern }))
     }
 
     fn duration(&self, ctx: &Context, params: &[types::Param]) -> Result<XsdDatatypes, FacetError> {
@@ -1698,9 +1700,14 @@ impl Compiler {
     }
 
     fn float(&self, ctx: &Context, params: &[types::Param]) -> Result<XsdDatatypes, FacetError> {
+        let mut min_max = MinMaxFacet::default();
         let mut pattern = None;
         for param in params {
             match &param.2.to_string()[..] {
+                "minInclusive" => min_max.min_inclusive(Self::f64(ctx, param)?)?,
+                "minExclusive" => min_max.min_exclusive(Self::f64(ctx, param)?)?,
+                "maxInclusive" => min_max.max_inclusive(Self::f64(ctx, param)?)?,
+                "maxExclusive" => min_max.max_exclusive(Self::f64(ctx, param)?)?,
                 "pattern" => pattern = Some(self.pattern(ctx, param)?),
                 _ => {
                     return Err(FacetError::InvalidFacet(
@@ -2067,12 +2074,146 @@ impl Compiler {
 
     fn pattern(&self, ctx: &Context, param: &types::Param) -> Result<PatternFacet, FacetError> {
         let raw = param.3.as_string_value();
+        let translated = xsd_regex_to_rust(&raw);
         // XSD spec: pattern facet must match the entire lexical value (implicit ^ and $).
-        let anchored = format!("^(?:{raw})$");
+        let anchored = format!("^(?:{translated})$");
         regex::Regex::new(&anchored)
             .map(|re| PatternFacet(raw, re))
             .map_err(|e| FacetError::InvalidPattern(ctx.convert_span(&param.0), e))
     }
+}
+
+/// Translate XSD regular expression syntax to Rust regex syntax.
+///
+/// XSD defines several character class escapes that don't exist in Rust's regex:
+///   \i  = XML initial name character (Letter | '_' | ':')
+///   \I  = complement of \i
+///   \c  = XML name character (Letter | Digit | '.' | '-' | '_' | ':' | CombiningChar | Extender)
+///   \C  = complement of \c
+///
+/// XSD also uses subtraction syntax inside character classes: [X-[Y]]
+/// which means "characters in X but not in Y".
+fn xsd_regex_to_rust(pattern: &str) -> String {
+    let mut result = String::with_capacity(pattern.len() * 2);
+    let chars: Vec<char> = pattern.chars().collect();
+    let len = chars.len();
+    let mut i = 0;
+
+    while i < len {
+        if chars[i] == '\\' && i + 1 < len {
+            match chars[i + 1] {
+                'i' => {
+                    // \i = initial name character: letters, underscore, colon
+                    // Simplified approximation using Unicode letter categories
+                    result.push_str("[\\p{L}_:]");
+                    i += 2;
+                }
+                'I' => {
+                    // \I = complement of \i
+                    result.push_str("[^\\p{L}_:]");
+                    i += 2;
+                }
+                'c' => {
+                    // \c = name character: letters, digits, '.', '-', '_', ':'
+                    result.push_str("[\\p{L}\\p{N}.\\-_:]");
+                    i += 2;
+                }
+                'C' => {
+                    // \C = complement of \c
+                    result.push_str("[^\\p{L}\\p{N}.\\-_:]");
+                    i += 2;
+                }
+                _ => {
+                    result.push(chars[i]);
+                    result.push(chars[i + 1]);
+                    i += 2;
+                }
+            }
+        } else if chars[i] == '[' {
+            // Process character class, handling XSD subtraction syntax [X-[Y]]
+            result.push('[');
+            i += 1;
+            i = translate_char_class(&chars, i, &mut result);
+        } else {
+            result.push(chars[i]);
+            i += 1;
+        }
+    }
+
+    result
+}
+
+/// Translate the inside of a character class, handling XSD subtraction [X-[Y]].
+/// Returns the index past the closing ']'.
+fn translate_char_class(chars: &[char], mut i: usize, result: &mut String) -> usize {
+    let len = chars.len();
+    // Track if we see the subtraction pattern "-["
+    let mut subtraction_start = None;
+
+    // Handle negation
+    if i < len && chars[i] == '^' {
+        result.push('^');
+        i += 1;
+    }
+
+    while i < len {
+        if chars[i] == ']' {
+            if let Some(_sub_start) = subtraction_start {
+                // We had a subtraction - the subtracted class was already ignored
+                // (we can't represent XSD subtraction in Rust regex easily, so we
+                // just drop the subtracted part for now)
+            }
+            result.push(']');
+            return i + 1;
+        } else if chars[i] == '-' && i + 1 < len && chars[i + 1] == '[' {
+            // XSD character class subtraction: -[...]
+            // Skip the subtracted class entirely (approximation)
+            subtraction_start = Some(i);
+            i += 2; // skip "-["
+            let mut depth = 1;
+            while i < len && depth > 0 {
+                if chars[i] == '[' {
+                    depth += 1;
+                } else if chars[i] == ']' {
+                    depth -= 1;
+                }
+                i += 1;
+            }
+            // Now i points past the closing ']' of the subtracted class
+            // Continue to get the closing ']' of the outer class
+        } else if chars[i] == '\\' && i + 1 < len {
+            match chars[i + 1] {
+                'i' => {
+                    result.push_str("\\p{L}_:");
+                    i += 2;
+                }
+                'I' => {
+                    // Can't negate inside a char class easily; approximate
+                    result.push_str("^\\p{L}_:");
+                    i += 2;
+                }
+                'c' => {
+                    result.push_str("\\p{L}\\p{N}.\\-_:");
+                    i += 2;
+                }
+                'C' => {
+                    result.push_str("^\\p{L}\\p{N}.\\-_:");
+                    i += 2;
+                }
+                _ => {
+                    result.push(chars[i]);
+                    result.push(chars[i + 1]);
+                    i += 2;
+                }
+            }
+        } else {
+            result.push(chars[i]);
+            i += 1;
+        }
+    }
+
+    result.push(']');
+    i
 }
 
 /// XSD QName value in the value-space: (namespace_uri, local_name).

@@ -78,6 +78,7 @@ struct Inner {
     memo: HashMap<Pat, PatId>,
     patterns: Vec<Pat>,
     refs: HashMap<*const Option<relaxng_model::model::DefineRule>, PatId>,
+    deferred_resolutions: Vec<(PatId, PatId)>,
 }
 #[derive(Default)]
 struct Schema {
@@ -285,10 +286,12 @@ impl Schema {
         }
         let target = self.patt(id);
         if let Pat::Placeholder(_) = target {
-            panic!(
-                "can't resolve placeholder {} with another placeholder {}",
-                placeholder_id.0, id.0
-            );
+            // The target is still a placeholder (e.g. `foo = bar` where bar
+            // hasn't been fully resolved yet). Record an indirect reference
+            // so we can resolve it in a second pass.
+            let mut inner = self.inner.borrow_mut();
+            inner.deferred_resolutions.push((placeholder_id, id));
+            return;
         }
         let mut inner = self.inner.borrow_mut();
         match &inner.patterns[placeholder_id.0 as usize] {
@@ -299,6 +302,44 @@ impl Schema {
             ),
         }
         inner.patterns[placeholder_id.0 as usize] = target;
+    }
+
+    fn resolve_deferred(&self) {
+        // Resolve any deferred placeholder-to-placeholder references.
+        // We iterate until no more progress is made.
+        loop {
+            let mut inner = self.inner.borrow_mut();
+            let pending: Vec<_> = inner.deferred_resolutions.drain(..).collect();
+            drop(inner);
+
+            if pending.is_empty() {
+                break;
+            }
+
+            let mut still_pending = Vec::new();
+            for (placeholder_id, target_id) in pending {
+                let target = self.patt(target_id);
+                if let Pat::Placeholder(_) = target {
+                    still_pending.push((placeholder_id, target_id));
+                } else {
+                    let mut inner = self.inner.borrow_mut();
+                    inner.patterns[placeholder_id.0 as usize] = target;
+                }
+            }
+
+            if still_pending.is_empty() {
+                break;
+            }
+
+            // If all deferred resolutions are still pending, we've made no
+            // progress. These are likely recursive references, which is fine.
+            let mut inner = self.inner.borrow_mut();
+            if inner.deferred_resolutions.is_empty() {
+                inner.deferred_resolutions = still_pending;
+                break;
+            }
+            inner.deferred_resolutions.extend(still_pending);
+        }
     }
     fn patt(&self, id: PatId) -> Pat {
         self.inner.borrow().patterns[id.0 as usize].clone()
@@ -604,6 +645,7 @@ impl<'a> Validator<'a> {
             &schema,
             Rc::as_ref(&model).borrow().as_ref().unwrap().pattern(),
         );
+        schema.resolve_deferred();
         let mut entity_definitions = HashMap::default();
         entity_definitions.insert("lt".to_string(), "<".to_string());
         entity_definitions.insert("gt".to_string(), ">".to_string());

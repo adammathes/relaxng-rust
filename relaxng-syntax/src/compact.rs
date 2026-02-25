@@ -568,8 +568,12 @@ fn except_pattern(input: Span) -> IResult<Span, Pattern> {
 //                   | "token"
 fn datatype_name(input: Span) -> IResult<Span, DatatypeName> {
     alt((
-        map(tag("string"), |_| DatatypeName::String),
-        map(tag("token"), |_| DatatypeName::Token),
+        map((tag("string"), peek(not(nc_name_char))), |(_, _)| {
+            DatatypeName::String
+        }),
+        map((tag("token"), peek(not(nc_name_char))), |(_, _)| {
+            DatatypeName::Token
+        }),
         map(cname, DatatypeName::CName),
     ))
     .parse(input)
@@ -692,6 +696,7 @@ where
 //                        | "div" "{" grammarContent* "}"
 //                        | "include" anyURILiteral [inherit] ["{" includeContent* "}"]
 fn grammar_content(input: Span) -> IResult<Span, GrammarContent> {
+    let (input, _annotation) = maybe_initial_annotation(input)?;
     alt((
         map(start, GrammarContent::Define),
         map(define, GrammarContent::Define),

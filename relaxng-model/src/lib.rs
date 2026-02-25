@@ -371,6 +371,26 @@ impl<'a> Context<'a> {
         }
     }
 
+    fn set_default_namespace(&mut self, uri: String) {
+        match self {
+            Context::Root {
+                default_namespace, ..
+            }
+            | Context::Include {
+                default_namespace, ..
+            } => {
+                *default_namespace = uri;
+            }
+            Context::IncludeOverrides { .. }
+            | Context::Grammar { .. }
+            | Context::Define { .. }
+            | Context::Element { .. }
+            | Context::Attribute { .. } => {
+                unreachable!("Not expecting to see default namespace declarations in this context")
+            }
+        }
+    }
+
     fn declare_namespace(&mut self, prefix: String, uri: String) -> Result<(), RelaxError> {
         match self {
             Context::Root { namespaces, .. } | Context::Include { namespaces, .. } => {
@@ -404,9 +424,15 @@ impl<'a> Context<'a> {
     }
     fn namespace_uri_for_prefix_str(&self, prefix: &str) -> Option<&str> {
         match self {
-            Context::Root { namespaces, .. } | Context::Include { namespaces, .. } => {
+            Context::Root { namespaces, .. } => {
                 namespaces.get(prefix).map(|s| &s[..])
             }
+            Context::Include {
+                namespaces, parent, ..
+            } => namespaces
+                .get(prefix)
+                .map(|s| &s[..])
+                .or_else(|| parent.namespace_uri_for_prefix_str(prefix)),
             Context::IncludeOverrides { parent, .. }
             | Context::Grammar { parent, .. }
             | Context::Define { parent, .. }
@@ -1419,12 +1445,23 @@ impl<FS: Files> Compiler<FS> {
         // TODO: get the span of the grammar in the file, rather than the span of the whole file
         let include_span = file.span;
 
-        // Propagate the ns attribute from <include> as the default namespace
-        let ns = inc
-            .3
-            .as_ref()
-            .map(|lit| lit.as_string_value())
-            .unwrap_or_default();
+        // Determine the default namespace for the included file:
+        // 1. If an explicit namespace literal is provided (extension), use that
+        // 2. If 'inherit = prefix' is specified, resolve the prefix to a namespace URI
+        // 3. Otherwise, per the RELAX NG compact syntax spec, inherit the parent's default namespace
+        let ns = if let Some(ref lit) = inc.3 {
+            lit.as_string_value()
+        } else if let Some(ref inherit) = inc.1 {
+            let prefix = inherit.0.to_string();
+            ctx.namespace_uri_for_prefix_str(&prefix)
+                .ok_or_else(|| RelaxError::UndefinedNamespacePrefix {
+                    span: ctx.convert_span(&inherit.0.span()),
+                    prefix: prefix.clone(),
+                })?
+                .to_string()
+        } else {
+            ctx.default_namespace_uri().to_string()
+        };
         let mut inc_ctx = ctx.new_include_with_ns(span, file, ns)?;
 
         if let Some(ref inherit) = inc.1 {
@@ -1729,13 +1766,13 @@ impl<FS: Files> Compiler<FS> {
             .get_schema(&path)
             .map_err(|e| RelaxError::IncludeError(span, Box::new(e)))?;
         let file_span = file.span;
-        // Propagate the ns attribute from <externalRef> as the default namespace
-        // for the referenced schema
-        let ns = external
-            .2
-            .as_ref()
-            .map(|lit| lit.as_string_value())
-            .unwrap_or_default();
+        // Propagate the default namespace: use explicit namespace if provided,
+        // otherwise inherit the parent's default namespace per the spec
+        let ns = if let Some(ref lit) = external.2 {
+            lit.as_string_value()
+        } else {
+            ctx.default_namespace_uri().to_string()
+        };
         let mut inc_ctx = ctx.new_include_with_ns(span, file, ns)?;
 
         match &s.pattern_or_grammar {
@@ -1984,8 +2021,10 @@ impl<FS: Files> Compiler<FS> {
                         panic!("Can't inherit namespace {prefix:?} at top level, I think?")
                     }
                     NamespaceUriLiteral::Uri(uri) => {
+                        let ns_uri = uri.as_string_value();
+                        ctx.set_default_namespace(ns_uri.clone());
                         if let Some(p) = prefix {
-                            ctx.declare_namespace(p.clone(), uri.as_string_value())
+                            ctx.declare_namespace(p.clone(), ns_uri)
                         } else {
                             Ok(())
                         }
