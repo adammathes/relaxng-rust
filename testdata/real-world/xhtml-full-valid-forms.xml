@@ -1,0 +1,212 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+  <head>
+    <title>Full XHTML Forms Test</title>
+    <meta name="description" content="Tests forms, fieldsets, inputs, selects, textareas, and event attributes"/>
+    <link rel="stylesheet" type="text/css" href="style.css" media="screen"/>
+    <style type="text/css" media="all">body { margin: 0; }</style>
+    <script type="text/javascript">var x = 1;</script>
+  </head>
+  <body onload="init()" onunload="cleanup()">
+    <h1 id="main-title" class="page-title header" style="color: red" title="Main Title" onclick="alert('hi')">Registration Form</h1>
+
+    <p>Please fill out the form below. Fields marked with <strong>*</strong> are required.</p>
+
+    <form action="https://example.com/submit" method="post" accept-charset="UTF-8" onsubmit="return validate()" onreset="clearAll()">
+      <fieldset>
+        <legend accesskey="P">Personal Information</legend>
+
+        <div>
+          <label for="fname">First Name *</label>
+          <input type="text" name="fname" id="fname" value="" size="30" maxlength="100" tabindex="1" accesskey="f" onfocus="highlight(this)" onblur="unhighlight(this)"/>
+        </div>
+
+        <div>
+          <label for="lname">Last Name *</label>
+          <input type="text" name="lname" id="lname" size="30" maxlength="100" tabindex="2"/>
+        </div>
+
+        <div>
+          <label for="email-field">Email</label>
+          <input type="text" name="email" id="email-field" tabindex="3" onchange="validateEmail(this)"/>
+        </div>
+
+        <div>
+          <label for="pass">Password</label>
+          <input type="password" name="pass" id="pass" size="20" tabindex="4"/>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Preferences</legend>
+
+        <div>
+          <label>Favorite Color:</label>
+          <select name="color" size="1" tabindex="5" onchange="updatePreview()">
+            <option value="red" label="Red">Red</option>
+            <option value="green" selected="selected">Green</option>
+            <option value="blue">Blue</option>
+            <optgroup label="Other Colors">
+              <option value="yellow">Yellow</option>
+              <option value="purple" disabled="disabled">Purple (unavailable)</option>
+            </optgroup>
+          </select>
+        </div>
+
+        <div>
+          <label>Subscribe to newsletter:</label>
+          <input type="checkbox" name="newsletter" value="yes" checked="checked"/>
+        </div>
+
+        <div>
+          <label>Gender:</label>
+          <input type="radio" name="gender" value="male"/> Male
+          <input type="radio" name="gender" value="female"/> Female
+          <input type="radio" name="gender" value="other"/> Other
+        </div>
+
+        <div>
+          <label for="bio">Biography</label>
+          <textarea name="bio" id="bio" rows="5" cols="40" tabindex="6" onfocus="expandArea(this)" onselect="trackSelection()">Default text here</textarea>
+        </div>
+
+        <div>
+          <label for="upload">Upload Avatar:</label>
+          <input type="file" name="avatar" id="upload" accept="image/*"/>
+        </div>
+
+        <input type="hidden" name="csrf_token" value="abc123"/>
+      </fieldset>
+
+      <div>
+        <button type="submit" name="submit" value="register" tabindex="7" onfocus="highlightBtn(this)">
+          <strong>Register</strong> Now
+        </button>
+        <button type="reset" name="reset" accesskey="r">
+          <em>Clear</em> Form
+        </button>
+        <input type="image" name="submit_img" src="submit.png" alt="Submit"/>
+      </div>
+    </form>
+
+    <hr/>
+
+    <noscript>
+      <p>JavaScript is required for this form to work properly.</p>
+    </noscript>
+
+    <!-- Test edit markup with dateTime -->
+    <div>
+      <ins datetime="2026-01-15T10:30:00Z">
+        <p>This paragraph was <ins>recently added</ins>.</p>
+      </ins>
+      <del datetime="2025-12-01T00:00:00Z">
+        <p>This paragraph was removed.</p>
+      </del>
+    </div>
+
+    <!-- Object/param test -->
+    <object data="movie.swf" type="application/x-shockwave-flash" width="400" height="300" name="player" tabindex="10">
+      <param name="quality" value="high" valuetype="data"/>
+      <param name="bgcolor" value="#ffffff"/>
+      <p>Flash content not available. Please install Flash Player.</p>
+    </object>
+
+    <!-- Image map test -->
+    <div>
+      <img src="map.png" alt="Site Map" width="600" height="400" usemap="#sitemap"/>
+      <map name="sitemap" id="sitemap">
+        <area shape="rect" coords="0,0,100,100" href="home.html" alt="Home" tabindex="20" accesskey="h" onfocus="showTip('home')" onblur="hideTip()"/>
+        <area shape="circle" coords="200,200,50" href="about.html" alt="About"/>
+        <area shape="poly" coords="300,0,400,100,300,100" href="contact.html" alt="Contact"/>
+        <area shape="default" nohref="nohref" alt="Other"/>
+      </map>
+    </div>
+
+    <!-- Table with colgroup, col, full attributes -->
+    <table summary="User list" border="1" cellspacing="0" cellpadding="5" width="100%" frame="box" rules="all">
+      <caption>Registered Users</caption>
+      <colgroup span="3" width="100%">
+        <col span="1" width="20%" align="left" valign="top"/>
+        <col width="20%" align="right"/>
+        <col align="center"/>
+      </colgroup>
+      <thead>
+        <tr align="center" valign="bottom">
+          <th scope="col" abbr="Name" id="th-name">Full Name</th>
+          <th scope="col" id="th-email">Email</th>
+          <th scope="col" id="th-role">Role</th>
+        </tr>
+      </thead>
+      <tfoot>
+        <tr>
+          <td colspan="3" align="right"><em>3 users total</em></td>
+        </tr>
+      </tfoot>
+      <tbody>
+        <tr>
+          <td headers="th-name" valign="middle">Alice Smith</td>
+          <td headers="th-email">alice@example.com</td>
+          <td headers="th-role" rowspan="2" align="center">Admin</td>
+        </tr>
+        <tr>
+          <td headers="th-name">Bob Jones</td>
+          <td headers="th-email">bob@example.com</td>
+        </tr>
+        <tr>
+          <td headers="th-name">Carol White</td>
+          <td headers="th-email">carol@example.com</td>
+          <td headers="th-role" align="center">User</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <!-- Deep inline nesting -->
+    <p>This is <em>emphasized with <strong>strong and <code>code inside <abbr title="abbreviation">abbr</abbr></code></strong></em> text with <sub>sub<sup>sup</sup></sub> and <q cite="https://example.com">a quote with <cite>a citation</cite></q>.</p>
+
+    <!-- Definition list -->
+    <dl>
+      <dt><dfn>Term One</dfn></dt>
+      <dd>Definition of term one with <kbd>keyboard</kbd> and <samp>sample</samp> output.</dd>
+      <dt><dfn>Term Two</dfn></dt>
+      <dd>
+        <p>A block-level definition.</p>
+        <pre xml:space="preserve">  Preformatted text  with spaces  </pre>
+      </dd>
+    </dl>
+
+    <!-- Address block -->
+    <address>
+      Contact: <a href="mailto:info@example.com">info@example.com</a><br/>
+      123 Main Street<br/>
+      <span class="city">Anytown</span>, ST 12345
+    </address>
+
+    <!-- Blockquote -->
+    <blockquote cite="https://example.com/source">
+      <p>To be or not to be, that is the question.</p>
+    </blockquote>
+
+    <!-- Deeply nested divs with mixed content -->
+    <div id="outer" class="container wrapper">
+      <div class="row">
+        <div class="col">
+          <h2>Section <tt>A</tt></h2>
+          <p>Paragraph with <i>italic</i>, <b>bold</b>, <big>big</big>, <small>small</small>, <var>variable</var>, and <acronym title="HyperText Markup Language">HTML</acronym>.</p>
+          <ul>
+            <li>Item one with <a href="page1.html" rel="next" hreflang="en" accesskey="1" tabindex="30" onfocus="f()" onblur="b()">a link</a></li>
+            <li>Item two</li>
+            <li>
+              <ol>
+                <li>Nested ordered item 1</li>
+                <li>Nested ordered item 2</li>
+              </ol>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <script type="text/javascript" src="app.js" defer="defer" xml:space="preserve"> </script>
+  </body>
+</html>

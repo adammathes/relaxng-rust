@@ -140,3 +140,73 @@ fn xsd_invalid_types() {
         "should be invalid: various XSD type constraint violations"
     );
 }
+
+// ── XHTML 1.0 Strict (full schema) ──────────────────────────────────────────
+//
+// Tests against the full XHTML schema which adds: forms, fieldset, object/param,
+// image maps, colgroup/col, ins/del, event attributes, noscript.
+
+#[test]
+fn xhtml_full_valid_forms() {
+    // Exercises forms, fieldset, input, select, textarea, button, label,
+    // object, param, image maps, colgroup/col, ins/del with dateTime,
+    // event attributes (onclick, onload, etc.), noscript
+    validate("xhtml1-strict-full.rng", "xhtml-full-valid-forms.xml").expect("should be valid");
+}
+
+#[test]
+fn xhtml_full_invalid_form() {
+    // Form missing required 'action' attribute
+    assert!(
+        validate("xhtml1-strict-full.rng", "xhtml-full-invalid-form.xml").is_err(),
+        "should be invalid: <form> missing required action attribute"
+    );
+}
+
+// ── SVG 1.1 ─────────────────────────────────────────────────────────────────
+//
+// Tests the SVG schema: multiple namespaces (SVG + XLink), shape elements,
+// gradients, clipping, masking, markers, patterns, text, transforms.
+
+#[test]
+fn svg_valid_shapes() {
+    // Exercises all shape elements, gradients, clip-path, mask, marker,
+    // pattern, symbol/use, text/tspan, xlink:href, presentation attributes
+    validate("svg11.rng", "svg-valid-shapes.xml").expect("should be valid");
+}
+
+#[test]
+fn svg_invalid_missing_attr() {
+    // rect missing required width and height attributes
+    assert!(
+        validate("svg11.rng", "svg-invalid-missing-attr.xml").is_err(),
+        "should be invalid: <rect> missing required width/height"
+    );
+}
+
+// ── DocBook 5 (full schema) ─────────────────────────────────────────────────
+//
+// Tests against the extended DocBook schema which adds: refentry, funcsynopsis,
+// cmdsynopsis, glossary, bibliography, index, qandaset, calloutlist, and
+// many additional inline elements.
+
+#[test]
+fn docbook_full_valid_refentry() {
+    // Exercises refentry, refmeta, refnamediv, refsynopsisdiv, refsection,
+    // funcsynopsis, funcprototype, funcdef, paramdef, cmdsynopsis,
+    // calloutlist, qandaset, procedure with substeps, variablelist,
+    // indexterm with primary/secondary, co/anchor/remark, userinput,
+    // computeroutput, systemitem, citetitle, simplelist, etc.
+    validate("docbook5-full.rng", "docbook-full-valid-refentry.xml").expect("should be valid");
+}
+
+#[test]
+fn docbook_full_valid_book() {
+    // Exercises book with: preface, part/partintro, chapter, appendix,
+    // glossary with glossdiv/glossentry/glossdef/glosssee/glossseealso,
+    // bibliography with bibliodiv/biblioentry/bibliomixed,
+    // index with indexdiv, colophon, keycombo, menuchoice,
+    // epigraph, sidebar, bridgehead, segmentedlist, simplelist,
+    // subjectset, and heavy interleave in info blocks
+    validate("docbook5-full.rng", "docbook-full-valid-book.xml").expect("should be valid");
+}

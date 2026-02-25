@@ -86,6 +86,7 @@ pub enum XsdDatatypes {
     Boolean(Option<PatternFacet>),
     Id(Option<PatternFacet>),
     IdRef(Option<PatternFacet>),
+    IdRefs(LengthFacet),
     // Previously unsupported types (Bug #4)
     Float(Option<PatternFacet>),
     NonNegativeInteger(MinMaxFacet<num_bigint::BigUint>, Option<PatternFacet>),
@@ -226,6 +227,24 @@ impl super::Datatype for XsdDatatypes {
             }
             XsdDatatypes::Id(patt) => patt.as_ref().map(|p| p.1.is_match(value)).unwrap_or(true),
             XsdDatatypes::IdRef(patt) => patt.as_ref().map(|p| p.1.is_match(value)).unwrap_or(true),
+            XsdDatatypes::IdRefs(len) => {
+                // IDREFS: space-separated list of one or more NCName (IDREF) values
+                let tokens: Vec<&str> = value.split_ascii_whitespace().collect();
+                !tokens.is_empty()
+                    && tokens.iter().all(|t| is_valid_ncname(t))
+                    && {
+                        let token_count = tokens.len();
+                        match len {
+                            LengthFacet::Unbounded => true,
+                            LengthFacet::MinLength(min) => token_count >= *min,
+                            LengthFacet::MaxLength(max) => token_count <= *max,
+                            LengthFacet::MinMaxLength(min, max) => {
+                                token_count >= *min && token_count <= *max
+                            }
+                            LengthFacet::Length(l) => token_count == *l,
+                        }
+                    }
+            }
             XsdDatatypes::Float(patt) => {
                 value.parse::<f32>().is_ok()
                     && patt.as_ref().map(|p| p.1.is_match(value)).unwrap_or(true)
@@ -945,6 +964,12 @@ impl Compiler {
                     type_name: "IDREF",
                     facet,
                 }),
+            "IDREFS" => self
+                .idrefs(ctx, params)
+                .map_err(|facet| XsdDatatypeError::Facet {
+                    type_name: "IDREFS",
+                    facet,
+                }),
             "unsignedLong" => {
                 self.unsigned_long(ctx, params)
                     .map_err(|facet| XsdDatatypeError::Facet {
@@ -1623,6 +1648,53 @@ impl Compiler {
         }
 
         Ok(XsdDatatypes::IdRef(pattern))
+    }
+
+    fn idrefs(&self, ctx: &Context, params: &[types::Param]) -> Result<XsdDatatypes, FacetError> {
+        let mut len = LengthFacet::Unbounded;
+
+        for param in params {
+            match &param.2.to_string()[..] {
+                "minLength" => {
+                    let v = Self::usize(ctx, param)?;
+                    len = match len {
+                        LengthFacet::Unbounded => LengthFacet::MinLength(v),
+                        LengthFacet::MaxLength(max) => LengthFacet::MinMaxLength(v, max),
+                        _ => {
+                            return Err(FacetError::InvalidFacet(
+                                ctx.convert_span(&param.0),
+                                param.2.to_string(),
+                            ));
+                        }
+                    };
+                }
+                "maxLength" => {
+                    let v = Self::usize(ctx, param)?;
+                    len = match len {
+                        LengthFacet::Unbounded => LengthFacet::MaxLength(v),
+                        LengthFacet::MinLength(min) => LengthFacet::MinMaxLength(min, v),
+                        _ => {
+                            return Err(FacetError::InvalidFacet(
+                                ctx.convert_span(&param.0),
+                                param.2.to_string(),
+                            ));
+                        }
+                    };
+                }
+                "length" => {
+                    let v = Self::usize(ctx, param)?;
+                    len = LengthFacet::Length(v);
+                }
+                _ => {
+                    return Err(FacetError::InvalidFacet(
+                        ctx.convert_span(&param.0),
+                        param.2.to_string(),
+                    ));
+                }
+            }
+        }
+
+        Ok(XsdDatatypes::IdRefs(len))
     }
 
     fn float(&self, ctx: &Context, params: &[types::Param]) -> Result<XsdDatatypes, FacetError> {
